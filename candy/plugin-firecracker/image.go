@@ -36,11 +36,6 @@ import (
 	"github.com/opencharly/spec/spec"
 )
 
-// rootDriveName is the path the root drive takes INSIDE the emitted artefact image. It is explicit
-// rather than the VM-box reader's default `/disk.qcow2`, because this artefact is not a qcow2 — it is a
-// raw ext4 root drive, and a reader that assumed otherwise would be the next defect.
-const rootDriveName = "/rootfs.ext4"
-
 // producer is everything the artefact producer needs, gathered so each step is testable on its own.
 type producer struct {
 	// Engine is the container engine name as charly knows it (podman/nerdctl/docker); the binary comes
@@ -269,9 +264,9 @@ func charlyBinary() string {
 // producer (ledger WI-7). It builds the box, extracts the image tree AS ROOT (the ownership law), and
 // formats the root drive — then reports the artefact's path and size.
 //
-// Publishing the artefact (EmitVmBoxAt + push, the AI-opencharly-vm-box label contract) is the next step
-// of this leg and is NOT claimed here: a verb that reported a published artefact it had not published
-// would be the fake fix this project refuses.
+// Publishing the artefact IS this command: EmitBox fills the AI-opencharly-vm-box label contract and hands
+// the root drive and the kernel to deploykit.EmitVmBoxMicroVM, optionally pushing the result. (The comment
+// here used to say publishing was "the next step" and named a symbol that does not exist; both were wrong.)
 func runImageCLI(a cliArgs) int {
 	if len(a.positional) == 0 || a.positional[0] != "build" || len(a.positional) < 2 {
 		fmt.Fprintln(os.Stderr, "firecracker image: usage is `charly firecracker image build <box> [--out DIR] [--engine podman]`")
@@ -327,7 +322,7 @@ func runImageCLI(a cliArgs) int {
 		fromImage = box
 	}
 
-	if err := p.EmitBox(context.Background(), a.ref, fromImage, drive, a.kernel, a.kernelFrom, a.push); err != nil {
+	if err := p.EmitBox(context.Background(), a.ref, fromImage, drive, a.kernel, a.push); err != nil {
 		fmt.Fprintf(os.Stderr, "firecracker image build %s: %v\n", box, err)
 
 		return 1
@@ -349,7 +344,7 @@ func runImageCLI(a cliArgs) int {
 // path the layer does not carry — and the provenance is the CALLER's to fill, because only the caller
 // knows where the artefacts came from. So this fills the rootfs arm with the fact it knows (the image
 // whose tree was materialised) and the kernel arm with what it was told, never with a guess.
-func (p producer) EmitBox(ctx context.Context, ref, fromImage, rootfs, kernel, kernelFrom string, push bool) error {
+func (p producer) EmitBox(ctx context.Context, ref, fromImage, rootfs, kernel string, push bool) error {
 	if ref == "" {
 		return fmt.Errorf("no artefact ref: emitting needs `--ref <image-ref>` to name the box image")
 	}
@@ -364,17 +359,7 @@ func (p producer) EmitBox(ctx context.Context, ref, fromImage, rootfs, kernel, k
 		}
 	}
 
-	meta := spec.VmBoxMetadata{
-		Version:       boxVersion(),
-		Arch:          "x86_64",
-		Init:          "systemd",
-		Distro:        p.Distro,
-		SSHUser:       p.SSHUser,
-		BaseUser:      p.BaseUser,
-		Firmware:      "bios",
-		CharlyInstall: "auto",
-		Source:        spec.VmBoxSource{Kind: "rootfs", Image: fromImage},
-	}
+	meta := p.boxMetadata(fromImage)
 
 	if err := deploykit.EmitVmBoxMicroVM(p.Engine, ref, &meta, rootfs, kernel); err != nil {
 		return fmt.Errorf("emit the microVM box %q: %w", ref, err)
@@ -404,6 +389,43 @@ func (p producer) sudoPrefix() string {
 	return "sudo -n "
 }
 
+// boxMetadata is the LABEL CONTRACT the emitted artefact carries, built as a pure function so a unit gate
+// can pin it without an engine, a tree or a build. Every field is read back out of the built image.
+func (p producer) boxMetadata(fromImage string) spec.VmBoxMetadata {
+	return spec.VmBoxMetadata{
+		Version:       boxVersion(),
+		Arch:          "x86_64",
+		Init:          "systemd",
+		Distro:        p.Distro,
+		SSHUser:       p.SSHUser,
+		BaseUser:      p.BaseUser,
+		Firmware:      "bios",
+		CharlyInstall: "auto",
+		Source:        spec.VmBoxSource{Kind: "rootfs", Image: fromImage},
+	}
+}
+
+// pickImageRef chooses the ref a box build produced out of the engine's image list. Pure, because the
+// SELECTION was wrong once: a build lands as localhost/<box>:<CalVer>, so a prefix match on the bare box
+// name misses it, and a rebuild adds a new CalVer while leaving the previous one behind.
+func pickImageRef(lines []string, box string) (string, bool) {
+	var refs []string
+
+	for _, line := range lines {
+		if r := strings.TrimSpace(line); strings.Contains(r, "/"+box+":") || strings.HasPrefix(r, box+":") {
+			refs = append(refs, r)
+		}
+	}
+
+	if len(refs) == 0 {
+		return "", false
+	}
+
+	sort.Strings(refs) // CalVer tags sort lexically by time
+
+	return refs[len(refs)-1], true
+}
+
 // resolveImageRef asks the engine which ref the box build produced. The newest match wins: a rebuild
 // adds a new CalVer tag and leaves the previous one in place.
 func (p producer) resolveImageRef(ctx context.Context, box string) (string, error) {
@@ -413,21 +435,10 @@ func (p producer) resolveImageRef(ctx context.Context, box string) (string, erro
 		return "", fmt.Errorf("ask the engine which image %q built: %w", box, err)
 	}
 
-	var refs []string
-
-	for _, line := range strings.Split(string(out), "\n") {
-		// CONTAINMENT, not prefix: a box build lands as localhost/<box>:<CalVer>, so a prefix match on
-		// the bare name misses it — measured, and it cost a run.
-		if r := strings.TrimSpace(line); strings.Contains(r, "/"+box+":") || strings.HasPrefix(r, box+":") {
-			refs = append(refs, r)
-		}
-	}
-
-	if len(refs) == 0 {
+	ref, ok := pickImageRef(strings.Split(string(out), "\n"), box)
+	if !ok {
 		return "", fmt.Errorf("the box build produced no image matching %q: the engine has no such ref", box)
 	}
 
-	sort.Strings(refs) // CalVer tags sort lexically by time
-
-	return refs[len(refs)-1], nil
+	return ref, nil
 }
