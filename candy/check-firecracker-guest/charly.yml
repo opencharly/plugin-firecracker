@@ -1,0 +1,16 @@
+# The guest userspace a Firecracker root drive must carry: an init that is PID 1 and an sshd to enter
+# through. Declared in the distro's own package section — keyed by distro name, with `package:` — the
+# shape a published candy uses and the shape the validator's TagSections predicate reads.
+check-firecracker-guest:
+    candy:
+        description: The guest userspace a Firecracker root drive must carry — systemd as PID 1 and sshd to enter through.
+        distro:
+            fedora:
+                package:
+                    - systemd
+                    - openssh-server
+                    - openssh-clients
+        plan:
+            - check: the guest userspace is really there — an init to be PID 1 and an sshd to enter through
+              id: guest-userspace-present
+              command: test -x /usr/lib/systemd/systemd && test -x /usr/sbin/sshd

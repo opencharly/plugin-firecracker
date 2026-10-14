@@ -5,6 +5,8 @@
 # `plugin.providers` entry (opencharly/charly#459). Declaring `discover:` is the whole fix: the
 # candy is scanned and the CUE-schema gate applies.
 discover:
+    - path: box
+      recursive: true
     - path: candy
       recursive: true
 
