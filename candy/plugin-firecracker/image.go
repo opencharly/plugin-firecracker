@@ -374,7 +374,12 @@ func (p producer) EmitBox(ctx context.Context, ref, fromImage, rootfs, kernel st
 	return nil
 }
 
-// boxVersion is the CalVer the box label carries. Empty on purpose: the artefact's version is the
+// boxVersion is the version the box label carries. It is EMPTY, and that is the whole truth: this build
+// has no CalVer stamp to inject, so nothing is invented here. The label version field is therefore left
+// empty on purpose rather than filled with a guess, and a consumer must not read it as a claim. Wiring a
+// real stamp (the emitter binary module version, which a tagged build carries) is the honest way to fill
+// it and is filed rather than faked. The previous doc here claimed the value was injected at build time,
+// which was false and made the unit gate around it a tautology.
 // release's business, and a producer that invented one would put a version in a label that no release
 // ever published.
 func boxVersion() string { return "" }
