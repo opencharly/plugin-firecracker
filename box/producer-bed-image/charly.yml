@@ -25,4 +25,5 @@ producer-bed-image:
             - '@github.com/opencharly/layer-container-nesting:v2026.271.2309'
             - '@github.com/opencharly/layer-firecracker/candy/layer-firecracker:v2026.287.1531'
             - '@github.com/opencharly/layer-supervisord:v2026.271.1817'
+            # FIRST: its steps are preconditions for the nesting candy's own build step.
             - producer-bed-env
