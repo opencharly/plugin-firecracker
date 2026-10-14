@@ -91,14 +91,18 @@ type verb struct{}
 // Reserved is the word this verb answers to.
 func (verb) Reserved() string { return "firecracker" }
 
-// RunVerb runs an authored `firecracker:` check step. Today it has exactly one method, and it is
-// read-only: `doctor` reports what this host can do, and ANY missing precondition makes the step
-// FAIL with the reason, because a bed that skipped the probe would report a green host it never
-// checked.
+// RunVerb runs an authored `firecracker:` check step. `doctor` reports what this host can do and
+// FAILS on any missing precondition; `vmm` proves the API client against the real VMM binary. Neither
+// method claims a guest was booted: the boot needs a rootfs from the producer leg (ledger WI-7), and a
+// verb that reported one before that existed would be a capability with nothing behind it.
 func (verb) RunVerb(_ context.Context, cc kit.CheckContext, op *spec.Op) kit.Result {
 	var in params.FirecrackerInput
 
 	kit.DecodeInput(op.PluginInput, &in)
+
+	if in.Method == "vmm" {
+		return runVMMProbe(in)
+	}
 
 	rep := runDoctor(doctorRequest{
 		Binary:           in.Binary,

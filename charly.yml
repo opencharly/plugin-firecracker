@@ -29,20 +29,41 @@ discover:
 # =============================================================================
 check-firecracker-host-app:
     local:
-        # Explicit placeholder: the recipe composes NO candy, so the bed's verdict is about the HOST
-        # and the plugin rather than about a package. Without this the node is invalid (a local
-        # template requires the field, and a missing required field must never be implied).
-        candy: []
+        # The HOST layer is the bed's own prerequisite, and it is a repo ref rather than a copy: the
+        # layer that installs the pinned VMM + kernel onto a host is `opencharly/layer-firecracker`, and
+        # one implementation of "install the VMM" is the point (R2). It applies root-scoped steps —
+        # exactly the work this bed exists to exercise on a disposable target.
+        candy:
+            - '@github.com/opencharly/layer-firecracker'
+        # Explicit placeholder for the plan's non-candy content.
         description: |-
-            Minimal `kind: local` TEMPLATE for the firecracker host-precondition bed: a bare
-            `local:` node whose plan runs the plugin's `firecracker:` verb in `doctor` mode. It
-            composes nothing, so the bed's verdict is about the HOST and the plugin, never about a
-            package or a service.
+            The recipe the firecracker host bed applies: the pinned host layer, then the two checks that
+            matter — what this host can do, and whether the API client speaks the VMM's own protocol.
         plan:
-            - check: the host can boot a microVM — KVM present and usable, the VMM binary answers, the kernel and root-drive artefacts exist, the containerd socket is reachable, and the configured snapshotter can back a root drive (a directory-mounting snapshotter never can)
+            - run: create the scratch root drive the client's lease points at
+              id: firecracker-probe-drive
+              command: |
+                set -eu
+                # The `vmm` probe CONFIGURES a drive; it does not boot it, because a boot needs a real
+                # rootfs artefact and that is the producer leg's job (ledger WI-7). So the drive only has
+                # to exist and be a filesystem the VMM will accept.
+                F=/tmp/charly-fc-probe-rootfs.ext4
+                if [ ! -f "$F" ]; then
+                  truncate -s 64M "$F"
+                  mke2fs -q -t ext4 -F "$F"
+                fi
+              run_as: root
+            - check: the host can boot a microVM — KVM, the VMM, the kernel, containerd, and the snapshotter the daemon actually SERVES
               id: firecracker-host-preconditions
               firecracker:
                   method: doctor
+                  kernel: /var/lib/firecracker/kernels/5.10/vmlinux
+            - check: the API client speaks the VMM's own protocol — the real binary accepts a whole lease and we read the documents back
+              id: firecracker-client-protocol
+              firecracker:
+                  method: vmm
+                  kernel: /var/lib/firecracker/kernels/5.10/vmlinux
+                  rootfs: /tmp/charly-fc-probe-rootfs.ext4
 
 check-firecracker-host:
     local:
@@ -51,8 +72,9 @@ check-firecracker-host:
         disposable: true
         lifecycle: dev
         description: >-
-            Sole R10 witness of the firecracker substrate plugin's read-only slice, run against the
-            operator's own host (a microVM's whole point is that it runs HERE). It proves the plugin
-            is discovered, that its `firecracker:` verb is dispatched and validated against the
-            served CUE schema, and that the verb's answer about the host is live. The launch leg
-            (booting a real guest, SSH into it, running an in-guest plan) extends this bed.
+            Sole R10 witness of the firecracker substrate plugin: the pinned VMM + kernel are installed
+            by opencharly/layer-firecracker onto this disposable target, the host is then asked what it
+            can actually do (KVM, the VMM and the version it answers, the fireactions kernel, containerd
+            and the snapshotter the daemon really serves), and the API client is proved against the REAL
+            VMM binary — it configures a whole lease and reads the decisive documents back. The guest
+            boot (a real rootfs, SSH into the guest, an in-guest plan) lands with the producer leg.
