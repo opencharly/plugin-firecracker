@@ -31,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -314,8 +315,14 @@ func (c *vmmClient) configure(ctx context.Context, l vmmLease) error {
 			return fmt.Errorf("read back mmds tree: %w", err)
 		}
 
-		if _, ok := tree["fireactions"]; !ok {
-			return fmt.Errorf("the mmds tree read back without its fireactions key: the guest agent would find nothing to register with")
+		// The invariant is EQUALITY, not the presence of one particular key. An earlier version
+		// hard-required a `fireactions` key here — which contradicted this plugin's own CLI, because
+		// `parseMMDS` adds that key only when a pool's JIT config is supplied: a legitimate bare lease
+		// would have been rejected by the very client that built it, and the `vmm` probe (whose lease
+		// carries only charly's identity) would have failed its own read-back. What the client must
+		// prove is that the tree the VMM serves is the tree it wrote.
+		if !reflect.DeepEqual(tree, l.MMDS) {
+			return fmt.Errorf("the mmds tree read back does not match the tree written: got %v, wrote %v", tree, l.MMDS)
 		}
 	}
 

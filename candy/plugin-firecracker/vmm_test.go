@@ -46,6 +46,9 @@ type fakeVMM struct {
 	// reject is a path answered with 400 instead of 204 — the control that proves a rejected document
 	// is reported rather than swallowed.
 	reject string
+	// mutateMMDS, when set, is served for GET /mmds INSTEAD of the tree that was written — the control
+	// for the read-back equality check.
+	mutateMMDS map[string]any
 	// version is what /version answers; a test can set it to prove the client reads it.
 	version string
 	socket  string
@@ -103,6 +106,7 @@ func (f *fakeVMM) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reject := f.reject
+	mutate := f.mutateMMDS
 	version := f.version
 	boot := f.boot
 	machine := f.machine
@@ -135,6 +139,12 @@ func (f *fakeVMM) handle(w http.ResponseWriter, r *http.Request) {
 
 		writeJSON(w, machine)
 	case r.URL.Path == apiMMDS && r.Method == http.MethodGet:
+		if mutate != nil {
+			writeJSON(w, mutate)
+
+			return
+		}
+
 		writeJSON(w, mmds)
 	case r.Method == http.MethodPut:
 		w.WriteHeader(http.StatusNoContent)
@@ -226,6 +236,33 @@ func TestVMMClient_ConfigureSendsTheProvenSequence(t *testing.T) {
 	fa, ok := f.mmds["fireactions"].(map[string]any)
 	if !ok || fa["runner_jit_config"] != "JIT" {
 		t.Errorf("the mmds tree lost the fireactions JIT config the guest agent registers with: %v", f.mmds)
+	}
+}
+
+// TestVMMClient_MMDSReadBackMustMatchWhatWasWritten asserts the invariant that replaced a hard-coded
+// key requirement. The old form demanded a `fireactions` key unconditionally — contradicting this
+// plugin's own CLI, which adds that key only when a pool's JIT config is supplied, so a legitimate bare
+// lease was rejected by the client that built it, and the `vmm` probe (charly's identity only) could
+// never pass its own read-back.
+func TestVMMClient_MMDSReadBackMustMatchWhatWasWritten(t *testing.T) {
+	// A BARE lease — no fireactions block — must configure cleanly.
+	f := newFakeVMM(t)
+	bare := vmmLease{
+		Name: "bare", KernelPath: "/k", RootDrive: "/r",
+		MMDS: map[string]any{"charly": map[string]any{"lease": "bare"}},
+	}
+
+	if err := newVMMClient(f.socket).configure(context.Background(), bare); err != nil {
+		t.Fatalf("a bare lease (no fireactions key) was rejected: %v", err)
+	}
+
+	// And a VMM that serves a DIFFERENT tree than it was given must fail the read-back: equality is the
+	// claim, so a mismatch is a real error rather than a tolerated difference.
+	g := newFakeVMM(t)
+	g.mutateMMDS = map[string]any{"charly": map[string]any{"lease": "SOMETHING-ELSE"}}
+
+	if err := newVMMClient(g.socket).configure(context.Background(), bare); err == nil {
+		t.Fatal("a mmds tree that did not match what was written was accepted")
 	}
 }
 
