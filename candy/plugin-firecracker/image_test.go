@@ -7,7 +7,8 @@ import (
 
 // TestElevationIsNarrowAndExplicit gates the producer's identity contract: the build and the engine reads
 // run as the INVOKING user (their store holds the image, and their engine resolves DNS), while exactly
-// two steps are elevated — the untar that preserves ownership and mke2fs, which must read root-only files.
+// four steps are elevated — the untar that preserves ownership, the du -sb measurement, the cleanup of a
+// previous run's tree, and mke2fs, which must read root-only files.
 //
 // The LAW itself is asserted POSITIVELY, and it cannot be asserted here: proving that an extracted image
 // tree comes out root-owned needs a real image and a real elevation, which is a bed's job, not a unit

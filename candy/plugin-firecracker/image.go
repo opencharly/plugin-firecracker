@@ -12,9 +12,9 @@ package firecracker
 //	(publickey,password)`. The artefact looks fine until a guest refuses the key, which is hours of
 //	debugging for a rootfs that was wrong from the start.
 //
-// So everything that READS the extracted tree runs elevated — the untar that buys the ownership, the
-// measurement of it, and mke2fs — while the build and the engine reads stay with the invoking user (whose
-// store holds the image and whose engine resolves DNS). The bed that proves this artefact asserts
+// So everything that touches the extracted tree runs elevated — the untar that buys the ownership, the
+// measurement of it, the cleanup of a previous run's tree, and mke2fs — while the build and the engine
+// reads stay with the invoking user (whose store holds the image and whose engine resolves DNS). The bed that proves this artefact asserts
 // OWNERSHIP of named paths, not that files exist.
 //
 // The recipe itself is measured, not invented: `mke2fs -t ext4 -F -d <tree> <file>` builds a real ext4
@@ -380,7 +380,9 @@ func (p producer) EmitBox(ctx context.Context, ref, fromImage, rootfs, kernel st
 func boxVersion() string { return "" }
 
 // sudoPrefix returns "sudo -n " when this process is not root, and nothing when it is. Elevation is
-// explicit and narrow: only the untar and mke2fs pass through it, never the build or the engine reads.
+// explicit and narrow: it is used by exactly the four commands that touch the EXTRACTED TREE — the untar
+// that buys the ownership, the du -sb measurement, the cleanup of a previous run tree, and mke2fs — and
+// never by the build or the engine reads, which stay as the invoking user.
 func (p producer) sudoPrefix() string {
 	if os.Geteuid() == 0 {
 		return ""
