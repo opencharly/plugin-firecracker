@@ -15,7 +15,21 @@ producer-bed-env:
         # under review.
         bake_plugin:
             - plugin-firecracker
+        # The nesting candy's precondition, measured: its own build step needs a per-user XDG runtime dir
+        # and fails with `Failed to obtain podman configuration: lstat /tmp/xdg-runtime: no such file or
+        # directory`. The org's boxes provide one; a plain fedora base does not, so this candy does — first,
+        # before the step that needs it.
+        env:
+            XDG_RUNTIME_DIR: /tmp/xdg-runtime
         plan:
+            - run: create the per-user XDG runtime directory the nested engine requires
+              id: xdg-runtime-dir
+              run_as: root
+              command: |
+                set -eu
+                mkdir -p /tmp/xdg-runtime
+                chmod 0700 /tmp/xdg-runtime
+                chown 1000:1000 /tmp/xdg-runtime
             - run: write the project manifest the producer resolves against
               id: producer-project-manifest
               write: /opt/fc-producer/charly.yml
