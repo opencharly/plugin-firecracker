@@ -158,11 +158,15 @@ check-firecracker-producer:
                 if ! "$CHARLY" firecracker image build producer-subject \
                        --ref localhost/fc-producer-proof:1 \
                        --kernel /var/lib/firecracker/kernels/5.10/vmlinux > /tmp/producer.log 2>&1; then
-                  echo "the producer failed; its own output follows:" >&2
-                  tail -25 /tmp/producer.log >&2
+                  # The error comes FIRST and is bounded, because the failure line itself is truncated:
+                  # measured, a 25-line tail pushed the producer own error off the end of what a reader sees.
+                  echo "=== the producer failed; its own output, head then tail:" >&2
+                  head -6 /tmp/producer.log >&2
+                  echo "=== ..." >&2
+                  tail -6 /tmp/producer.log >&2
                   exit 1
                 fi
-                tail -5 /tmp/producer.log >&2
+                tail -3 /tmp/producer.log >&2
                 L=$(podman inspect localhost/fc-producer-proof:1 --format '{{ index .Labels "ai.opencharly.vm.box" }}')
                 echo "$L"
                 echo "$L" | grep -q rootfs_path
@@ -244,14 +248,51 @@ check-firecracker-producer-vm:
                 # The producer's four elevations go through `sudo -n`, and an unasserted precondition is
                 # exactly the kind that fails inside a step whose output is swallowed.
                 sudo -n true 2>/dev/null || { echo "NO PASSWORDLESS SUDO: the producer cannot elevate for the untar, the measurement, the cleanup and mke2fs" >&2; exit 1; }
-                echo "guest: user=$(id -u) sudo=ok podman=$(podman --version | head -1) charly=$(${CHARLY:-charly} version 2>&1 | head -1)" >&2
+                # No shell default-value expressions here, and none in this comment either: charly scans the
+                # WHOLE step text for its own variable substitution - comments included - and SKIPS the step
+                # when one does not resolve. Measured twice: it turned a real producer FAILURE into a vacuous
+                # PASS, and then the comment explaining that repeated the same mistake. A step whose text
+                # names an unresolved variable must never silently become evidence.
                 cd /opt/fc-producer
+                # The charly a deploy provides to its target, falling back to PATH - and it NAMES ITSELF on
+                # failure. Measured: this was the only precondition without a message, and it is exactly where
+                # the run died, so the failure line showed the guest summary and nothing else.
+                # The deploy own layout, MEASURED from the guest: /tmp/charly-<CalVer>[-<hash>]/bin/charly.
+                # The previous lookup missed it because find treats -maxdepth as a GLOBAL option and it was
+                # placed after the paths, so it never matched - and the failure said so, which is why this
+                # took one run instead of another round.
+                # The deploy provides charly as a FILE at /tmp/charly-<CalVer>[-<hash>] - MEASURED inside the
+                # guest, where that path is a 52 MB EXECUTABLE and not a directory. Two earlier lookups missed
+                # it for two different wrong assumptions: a glob that expected a bin/ subdirectory, and a find
+                # for a file named exactly charly - which it is not, the CalVer is part of the name.
                 CHARLY=$(command -v charly || true)
-                if [ -z "$CHARLY" ]; then CHARLY=$(find /tmp -maxdepth 3 -name charly -type f -perm -u+x 2>/dev/null | head -1); fi
-                test -x "$CHARLY"
-                "$CHARLY" firecracker image build producer-subject \
-                  --ref localhost/fc-producer-proof:1 \
-                  --kernel /var/lib/firecracker/kernels/5.10/vmlinux
+                if [ -z "$CHARLY" ]; then
+                  for f in /tmp/charly-*; do
+                    if [ -f "$f" ] && [ -x "$f" ]; then CHARLY="$f"; break; fi
+                  done
+                fi
+                if [ ! -x "$CHARLY" ]; then
+                  echo "NO CHARLY FOUND in the guest. /tmp holds:" >&2
+                  ls /tmp >&2
+                  echo "PATH=$PATH" >&2
+                  exit 1
+                fi
+                # Where could a plugin be? Measured in plugin_loader.go: $CHARLY_PLUGIN_DIR is resolved
+                # first, then the FHS dir, and a dev/worktree build REFUSES the packaged dir - which is the
+                # build a deploy provides to its target. So the guest is asked, on stderr, before it runs.
+                echo "plugin env: $(printenv CHARLY_PLUGIN_DIR || echo unset)" >&2
+                ls -d /usr/lib/charly/plugins 2>/dev/null >&2
+                ls ~/.cache/charly/plugins 2>/dev/null | head -4 >&2
+                if ! "$CHARLY" firecracker image build producer-subject \
+                       --ref localhost/fc-producer-proof:1 \
+                       --kernel /var/lib/firecracker/kernels/5.10/vmlinux > /tmp/producer.log 2>&1; then
+                  echo "=== the producer failed; its own output follows:" >&2
+                  head -10 /tmp/producer.log >&2
+                  exit 1
+                fi
+                # The summary prints only on SUCCESS, so a failure line leads with the producer's own error
+                # rather than with a reassurance that the preconditions were fine.
+                echo "guest ok: user=$(id -u) sudo=ok" >&2
                 L=$(podman inspect localhost/fc-producer-proof:1 --format '{{ index .Labels "ai.opencharly.vm.box" }}')
                 echo "$L"
                 echo "$L" | grep -q rootfs_path

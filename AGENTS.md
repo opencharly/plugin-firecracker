@@ -75,7 +75,10 @@ lease.
   image and whose network resolves), and **everything that touches the extracted tree is elevated**
   through one explicit `sudo -n` — the untar that buys the ownership, the `du -sb` measurement, the
   cleanup of a previous run's tree, and `mke2fs`, which must read root-only files such as `/etc/gshadow`.
-  The bed that proves all of this inside a disposable target is opencharly/plugin-firecracker#5.
+  The disposable-target proof SHIPS: `check-firecracker-producer-vm` runs the producer inside a disposable
+  GUEST (a VM, because a pod cannot host an engine and the nesting candy's builder stage needs a precondition
+  no consumer can supply), and asserts the emitted microVM box image at its boundary there. opencharly/
+  plugin-firecracker#5 is scoped to the POD bed alone, whose image cannot build.
 
   The boot, executed (a VMM driven over its API socket; no TAP, no root, no network needed):
 
