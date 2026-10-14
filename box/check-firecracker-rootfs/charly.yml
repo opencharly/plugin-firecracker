@@ -5,6 +5,10 @@
 check-firecracker-rootfs:
     candy:
         description: A minimal Fedora root filesystem for the Firecracker artefact producer — the subject its pipeline runs on.
+        # The DISTRO TAG is what selects the candy's distro-scoped package section: without it the
+        # guest candy declares systemd and sshd under distro.fedora and NOTHING installs them, so the
+        # produced root drive is a machine with no init and no way in - measured, from the drive itself.
+        distro: [fedora]
         build: [rpm]
         base: quay.io/fedora/fedora:43
         candy:
