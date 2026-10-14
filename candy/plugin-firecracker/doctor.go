@@ -293,25 +293,53 @@ func probeSnapshotterServed(rep *doctorReport) {
 		return // the daemon did not answer ctr either; the socket result already says what is known
 	}
 
-	for _, line := range strings.Split(string(out), "\n") {
+	state, found := snapshotterStateFromCTR(string(out), rep.Snapshotter)
+	if !found {
+		rep.SnapshotterServed = "absent"
+
+		rep.Problems = append(rep.Problems,
+			fmt.Sprintf("the daemon does not serve a snapshotter named %q at all", rep.Snapshotter))
+
+		return
+	}
+
+	rep.SnapshotterServed = state
+
+	if state != "ok" {
+		rep.Problems = append(rep.Problems,
+			fmt.Sprintf("the daemon is NOT serving snapshotter %q (state %q): a pool configured for it cannot start", rep.Snapshotter, state))
+	}
+}
+
+// snapshotterStateFromCTR reads ONE snapshotter's state out of `ctr plugins ls`.
+//
+// The output is COLUMNAR with FOUR fields, measured on a live daemon rather than assumed:
+//
+//	TYPE                                      ID          PLATFORMS      STATUS
+//	io.containerd.snapshotter.v1              devmapper   linux/amd64    skip
+//	io.containerd.snapshotter.v1              overlayfs   linux/amd64    ok
+//
+// An earlier version of this read `fields[2]` as the state, which is the PLATFORMS column: on a
+// healthy host it recorded "linux/amd64" as the state and appended a FALSE problem ("the daemon is NOT
+// serving snapshotter …"), failing a host that was fine. The state is the LAST field, and the row must
+// have all four columns for that to be true — a short row is not evidence of anything.
+//
+// Pure and total so the gate can pin it against the REAL captured output: no process, no socket.
+func snapshotterStateFromCTR(out, snapshotter string) (string, bool) {
+	const columns = 4
+
+	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
-		// io.containerd.snapshotter.v1  devmapper  skip
-		if len(fields) >= 3 && fields[1] == rep.Snapshotter {
-			rep.SnapshotterServed = fields[2]
+		if len(fields) < columns {
+			continue
+		}
 
-			if fields[2] != "ok" {
-				rep.Problems = append(rep.Problems,
-					fmt.Sprintf("the daemon is NOT serving snapshotter %q (state %q): a pool configured for it cannot start", rep.Snapshotter, fields[2]))
-			}
-
-			return
+		if fields[1] == snapshotter {
+			return fields[len(fields)-1], true
 		}
 	}
 
-	rep.SnapshotterServed = "absent"
-
-	rep.Problems = append(rep.Problems,
-		fmt.Sprintf("the daemon does not serve a snapshotter named %q at all", rep.Snapshotter))
+	return "", false
 }
 
 func probeForwarding(rep *doctorReport) {

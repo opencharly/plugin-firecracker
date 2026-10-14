@@ -66,9 +66,14 @@ check-firecracker-guest:
 # check-firecracker-host-app — the recipe the nested member applies INSIDE the guest.
 #
 # The PINNED host layer is the prerequisite and it is a repo ref, not a copy: one implementation of
-# "install the VMM and the kernel" is the point (R2). The pin is the layer's first CalVer tag, because
-# a ref to an untagged repo cannot resolve at all — measured, and the reason this leg waited for that
-# tag to exist (opencharly/layer-firecracker#5).
+# "install the VMM and the kernel" is the point (R2).
+#
+# The ref has TWO measured parts, and the earlier version of this comment got the second one wrong:
+#   * the PATH form is what resolves a candy. A bare repo ref resolves a candy in that repo's ROOT; a
+#     candy under candy/<name>/ must be addressed as <repo>/candy/<name>. Measured: the bare ref FAILS
+#     even with a tag present, and the path ref SUCCEEDS with no tag at all.
+#   * the TAG is the right pin for immutability (Policy B), not a resolution requirement. It is the
+#     layer's first CalVer tag, minted when its posture PR merged (opencharly/layer-firecracker#5).
 # =============================================================================
 check-firecracker-host-app:
     local:
