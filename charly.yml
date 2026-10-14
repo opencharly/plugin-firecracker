@@ -117,3 +117,43 @@ check-firecracker-host:
         check-firecracker-host-member:
             local:
                 from: check-firecracker-host-app
+
+# =============================================================================
+# The R10 bed for the ARTEFACT PRODUCER (WI-7).
+#
+# The producer is a HOST-building tool, so its disposable target is a pod carrying its own environment:
+# the charly CLI, a nested rootless engine (whose network resolves, unlike this host's rootful one), the
+# pinned kernel the emitted artefact must ship, the plugin baked from the branch under review, and the
+# project written in by `producer-bed-project` because a pod has no checkout.
+#
+# The step PRODUCES and then asserts, in that order, because the assertions are about an artefact that has
+# to exist first. What it asserts is what the ledger's R7 demands of an artefact: the label contract read
+# back from the built image, and the drive and the kernel verified inside it — not that a command exited 0.
+check-firecracker-producer:
+    pod:
+        image: producer-bed-image
+        disposable: true
+        lifecycle: test
+        description: >-
+            The artefact producer on a real pod: `charly firecracker image build` turns a charly-built box
+            into a microVM box image, and the emitted image is asserted at its boundary — the
+            ai.opencharly.vm.box label read back with its rootfs_path and kernel_path, and both files
+            verified inside the image. A pod has no /dev/kvm, so this bed proves the PRODUCER and its
+            artefact; booting that artefact is a VM bed's job (WI-13).
+        plan:
+            - check: the producer emits a microVM box image carrying the drive and the kernel, and says so in its label
+              id: producer-artefact
+              command: |
+                set -eu
+                cd /opt/fc-producer
+                charly firecracker image build producer-subject \
+                  --ref localhost/fc-producer-proof:1 \
+                  --kernel /var/lib/firecracker/kernels/5.10/vmlinux
+                L=$(podman inspect localhost/fc-producer-proof:1 --format '{{ index .Labels "ai.opencharly.vm.box" }}')
+                echo "$L"
+                echo "$L" | grep -q rootfs_path
+                echo "$L" | grep -q kernel_path
+                ID=$(podman create localhost/fc-producer-proof:1)
+                podman export "$ID" | tar -t | grep -qx rootfs.img
+                podman export "$ID" | tar -t | grep -qx vmlinux
+                podman rm -f "$ID" >/dev/null
