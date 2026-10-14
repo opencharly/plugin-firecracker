@@ -28,7 +28,13 @@ type FirecrackerPlugin struct {
 // guest behind it. `doctor` therefore answers what THIS HOST can do — the question every bed and
 // every operator asks first — and says so in its report.
 type FirecrackerInput struct {
-	// method selects what the verb does. Only the read-only host probe exists today.
+	// method selects what the verb does.
+	//
+	//	doctor — the read-only host probe (what can THIS host do?).
+	//	vmm    — a self-test of the API client against the REAL VMM binary: start it on a scratch
+	//	         socket, write a whole lease into it, read the decisive documents back, and stop it.
+	//	         It exists because "the client compiles" and "the client speaks the VMM's protocol"
+	//	         are different claims, and the second one is the product.
 	Method string `yaml:"method,omitempty" json:"method"`
 
 	// binary is the VMM binary to inspect; empty means the one on PATH. A path that is present but
@@ -50,4 +56,16 @@ type FirecrackerInput struct {
 
 	// containerd_socket is the daemon socket to report on; empty means the engine default.
 	ContainerdSocket string `yaml:"containerd_socket,omitempty" json:"containerd_socket,omitempty"`
+
+	// guest_ip / tap_ip / guest_mac / tap_name describe the lease's network for the `vmm` method: the
+	// two ends of the /30 the guest's interface is configured with, and the TAP its NIC is attached to.
+	// A microVM has NO DHCP, so an unrouted guest is a guest nobody can reach — the addresses go on
+	// the kernel command line, exactly as the proven path did. Empty tap_name means no NIC at all.
+	GuestIP string `yaml:"guest_ip,omitempty" json:"guest_ip,omitempty"`
+
+	TAPIP string `yaml:"tap_ip,omitempty" json:"tap_ip,omitempty"`
+
+	GuestMAC string `yaml:"guest_mac,omitempty" json:"guest_mac,omitempty"`
+
+	TAPName string `yaml:"tap_name,omitempty" json:"tap_name,omitempty"`
 }

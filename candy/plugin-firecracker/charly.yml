@@ -11,7 +11,8 @@ plugin-firecracker:
             deploy into `charly vm build`/`charly vm create` (IsVmVenue is ssh AND
             exclusive_venue). This plugin owns the BEHAVIOUR behind the word.
 
-            THE FIRST SLICE IS THE READ-ONLY HOST PROBE, deliberately. `firecracker: {method: doctor}`
+            THE HOST PROBE AND THE API CLIENT, and deliberately nothing further. `firecracker: {method:
+            doctor}`
             (and `charly firecracker doctor`) report what the target host can actually do: /dev/kvm
             and its mode, the VMM binary and its version, the kernel and root-drive artefacts, the
             containerd socket and whether the CONFIGURED snapshotter can back a root drive at all,

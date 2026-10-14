@@ -62,19 +62,23 @@ type doctorRequest struct {
 // doctorReport is the probe's answer. `Problems` is the verdict: the verb FAILS when it is non-empty,
 // so a bed cannot pass by reporting a host it never checked.
 type doctorReport struct {
-	KVM              bool     `json:"kvm"`
-	KVMPath          string   `json:"kvm_path,omitempty"`
-	KVMMode          string   `json:"kvm_mode,omitempty"`
-	Binary           string   `json:"binary,omitempty"`
-	BinaryVersion    string   `json:"binary_version,omitempty"`
-	Kernel           string   `json:"kernel,omitempty"`
-	Rootfs           string   `json:"rootfs,omitempty"`
-	Snapshotter      string   `json:"snapshotter,omitempty"`
-	RootDriveCapable bool     `json:"root_drive_capable"`
-	ContainerdSocket string   `json:"containerd_socket,omitempty"`
-	ContainerdUp     bool     `json:"containerd_reachable"`
-	IPForward        string   `json:"ip_forward,omitempty"`
-	Problems         []string `json:"problems,omitempty"`
+	KVM              bool   `json:"kvm"`
+	KVMPath          string `json:"kvm_path,omitempty"`
+	KVMMode          string `json:"kvm_mode,omitempty"`
+	Binary           string `json:"binary,omitempty"`
+	BinaryVersion    string `json:"binary_version,omitempty"`
+	Kernel           string `json:"kernel,omitempty"`
+	Rootfs           string `json:"rootfs,omitempty"`
+	Snapshotter      string `json:"snapshotter,omitempty"`
+	RootDriveCapable bool   `json:"root_drive_capable"`
+	// SnapshotterServed is what the DAEMON says: "ok", the daemon's own reason it is not serving it,
+	// or "" when the probe could not ask. The distinction is the whole point of ledger WI-15 — a
+	// snapshotter can be configured, and still not be served, and a pool then cannot start at all.
+	SnapshotterServed string   `json:"snapshotter_served,omitempty"`
+	ContainerdSocket  string   `json:"containerd_socket,omitempty"`
+	ContainerdUp      bool     `json:"containerd_reachable"`
+	IPForward         string   `json:"ip_forward,omitempty"`
+	Problems          []string `json:"problems,omitempty"`
 }
 
 // rootDriveCapable reports whether a containerd snapshotter can back a microVM root drive. Only the
@@ -94,7 +98,7 @@ func (r doctorReport) summary() string {
 	parts := []string{
 		fmt.Sprintf("kvm=%s", yesNo(r.KVM)),
 		fmt.Sprintf("vmm=%s", orNone(r.BinaryVersion)),
-		fmt.Sprintf("snapshotter=%s(%s)", r.Snapshotter, capableWord(r.RootDriveCapable)),
+		fmt.Sprintf("snapshotter=%s(%s%s)", r.Snapshotter, capableWord(r.RootDriveCapable), servedSuffix(r.SnapshotterServed)),
 		fmt.Sprintf("containerd=%s", upWord(r.ContainerdUp)),
 		fmt.Sprintf("forward=%s", orNone(r.IPForward)),
 	}
@@ -110,6 +114,15 @@ func (r doctorReport) summary() string {
 	}
 
 	return line
+}
+
+// servedSuffix renders what the daemon said about the snapshotter, or nothing when it was not asked.
+func servedSuffix(served string) string {
+	if served == "" {
+		return ""
+	}
+
+	return ", served=" + served
 }
 
 func yesNo(b bool) string {
@@ -257,6 +270,81 @@ func probeContainerd(rep *doctorReport) {
 	_ = conn.Close()
 
 	rep.ContainerdUp = true
+
+	// Ask only when a snapshotter was CONFIGURED. With an empty name no row can match, so the probe
+	// appended 'the daemon does not serve a snapshotter named "" at all' and failed a host that
+	// configured none.
+	if rep.Snapshotter != "" {
+		probeSnapshotterServed(rep)
+	}
+}
+
+// probeSnapshotterServed asks the DAEMON whether it is actually serving the configured snapshotter.
+// A configured name is not a served plugin: the host that filed ledger WI-15 had devmapper in its
+// configuration and the plugin in "skip", so a pool would have been accepted and could never start.
+// The probe uses ctr when it is there; when it is not, the report says the question went unasked
+// rather than implying an answer.
+func probeSnapshotterServed(rep *doctorReport) {
+	ctr, err := exec.LookPath("ctr")
+	if err != nil {
+		return // unasked, and the report says so by leaving the field empty
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, ctr, "plugins", "ls").Output()
+	if err != nil {
+		return // the daemon did not answer ctr either; the socket result already says what is known
+	}
+
+	state, found := snapshotterStateFromCTR(string(out), rep.Snapshotter)
+	if !found {
+		rep.SnapshotterServed = "absent"
+
+		rep.Problems = append(rep.Problems,
+			fmt.Sprintf("the daemon does not serve a snapshotter named %q at all", rep.Snapshotter))
+
+		return
+	}
+
+	rep.SnapshotterServed = state
+
+	if state != "ok" {
+		rep.Problems = append(rep.Problems,
+			fmt.Sprintf("the daemon is NOT serving snapshotter %q (state %q): a pool configured for it cannot start", rep.Snapshotter, state))
+	}
+}
+
+// snapshotterStateFromCTR reads ONE snapshotter's state out of `ctr plugins ls`.
+//
+// The output is COLUMNAR with FOUR fields, measured on a live daemon rather than assumed:
+//
+//	TYPE                                      ID          PLATFORMS      STATUS
+//	io.containerd.snapshotter.v1              devmapper   linux/amd64    skip
+//	io.containerd.snapshotter.v1              overlayfs   linux/amd64    ok
+//
+// An earlier version of this read `fields[2]` as the state, which is the PLATFORMS column: on a
+// healthy host it recorded "linux/amd64" as the state and appended a FALSE problem ("the daemon is NOT
+// serving snapshotter …"), failing a host that was fine. The state is the LAST field, and the row must
+// have all four columns for that to be true — a short row is not evidence of anything.
+//
+// Pure and total so the gate can pin it against the REAL captured output: no process, no socket.
+func snapshotterStateFromCTR(out, snapshotter string) (string, bool) {
+	const columns = 4
+
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < columns {
+			continue
+		}
+
+		if fields[1] == snapshotter {
+			return fields[len(fields)-1], true
+		}
+	}
+
+	return "", false
 }
 
 func probeForwarding(rep *doctorReport) {

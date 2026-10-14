@@ -40,10 +40,15 @@ const calver = "2026.287.0001"
 // NewProvider returns the provider for the gRPC (out-of-process) placement.
 func NewProvider() pb.ProviderServer { return &provider{} }
 
-// NewCheckVerb returns the check-verb provider. The `firecracker:` verb dispatches IN-PROCESS via
-// RunVerb, which is what keeps the live runner — the run mode and the deploy context an
-// out-of-process Invoke cannot see.
-func NewCheckVerb() kit.CheckVerbProvider { return verb{} }
+// NewCheckVerb returns the check-verb provider — the SAME type NewProvider returns, deliberately.
+//
+// The SDK hands the provider to its server and asks it whether it also implements
+// kit.CheckVerbProvider: if it does, `firecracker:` steps are routed to RunVerb; if it does NOT, they
+// fall through to Invoke, which serves the COMMAND class and runs the CLI. That is exactly what
+// happened here, and it failed invisibly: every `firecracker:` check step in every bed executed the
+// command path instead of the verb and reported `firecracker: command exited 1`, so no check of this
+// plugin ever ran until the venue-aware probe made the failure visible.
+func NewCheckVerb() kit.CheckVerbProvider { return &provider{} }
 
 // NewMeta advertises the TWO words this plugin serves, each with this plugin's OWN self-contained
 // CUE schema (there is no schema-less plugin: the schema is served over Describe, spliced onto the
@@ -53,7 +58,7 @@ func NewCheckVerb() kit.CheckVerbProvider { return verb{} }
 func NewMeta() pb.PluginMetaServer {
 	return sdk.NewMeta(calver,
 		[]sdk.ProvidedCapability{
-			{Class: "verb", Word: "firecracker", InputDef: "#FirecrackerInput"},
+			{Class: "verb", Word: "firecracker", InputDef: "#FirecrackerInput", Primary: "method"},
 			{Class: "command", Word: "firecracker"},
 		},
 		schemaFS)
@@ -61,10 +66,33 @@ func NewMeta() pb.PluginMetaServer {
 
 type provider struct{ pb.UnimplementedProviderServer }
 
-// Invoke serves the COMPILED-IN (in-proc) command dispatch: decode the pass-through `{args}` and run
-// the command effect in charly's own process. Out-of-process dispatch fork/execs the binary
-// (CliMain instead), never this gRPC path.
-func (provider) Invoke(_ context.Context, req *pb.InvokeRequest) (*pb.InvokeReply, error) {
+// Invoke serves BOTH classes this plugin declares, and it MUST dispatch on the class.
+//
+// An earlier version never looked at req.GetClass() and ran the command effect unconditionally. Every
+// `firecracker:` CHECK step therefore ran the CLI, exited 1, and was reported as
+// `firecracker: command exited 1` — with the check verb never invoked at all. That is the defect that
+// made this plugin's green meaningless: no check of it had ever executed.
+func (p *provider) Invoke(ctx context.Context, req *pb.InvokeRequest) (*pb.InvokeReply, error) {
+	switch req.GetClass() {
+	case classCommand:
+		return invokeCommand(req)
+	case classVerb:
+		return p.invokeVerb(ctx, req)
+	default:
+		return nil, fmt.Errorf("firecracker: unsupported class %q", req.GetClass())
+	}
+}
+
+// classCommand / classVerb are the two provider classes this plugin declares.
+const (
+	classCommand = "command"
+	classVerb    = "verb"
+)
+
+// invokeCommand serves the COMPILED-IN (in-proc) command dispatch: decode the pass-through `{args}`
+// and run the command effect in charly's own process. Out-of-process command dispatch fork/execs the
+// binary (CliMain instead), never this gRPC path.
+func invokeCommand(req *pb.InvokeRequest) (*pb.InvokeReply, error) {
 	if req.GetOp() != sdk.OpRun {
 		return nil, fmt.Errorf("firecracker: unsupported op %q (only %q)", req.GetOp(), sdk.OpRun)
 	}
@@ -86,19 +114,61 @@ func (provider) Invoke(_ context.Context, req *pb.InvokeRequest) (*pb.InvokeRepl
 	return &pb.InvokeReply{}, nil
 }
 
-type verb struct{}
+// invokeVerb runs one `firecracker:` check operation OUT OF PROCESS: the same core RunVerb executes,
+// with the CheckContext reconstructed from the host's reverse channel — sdk.NewCheckContext carries
+// the venue executor (ExecutorService), which is exactly what the venue-aware probe drives. Placement
+// is invisible to the verb (R2: one implementation, two placements).
+func (p *provider) invokeVerb(ctx context.Context, req *pb.InvokeRequest) (*pb.InvokeReply, error) {
+	var op spec.Op
 
-// Reserved is the word this verb answers to.
-func (verb) Reserved() string { return "firecracker" }
+	if len(req.GetParamsJson()) > 0 {
+		if err := json.Unmarshal(req.GetParamsJson(), &op); err != nil {
+			return sdk.ResultJSON("fail", "firecracker: decode op: "+err.Error())
+		}
+	}
 
-// RunVerb runs an authored `firecracker:` check step. Today it has exactly one method, and it is
-// read-only: `doctor` reports what this host can do, and ANY missing precondition makes the step
-// FAIL with the reason, because a bed that skipped the probe would report a green host it never
-// checked.
-func (verb) RunVerb(_ context.Context, cc kit.CheckContext, op *spec.Op) kit.Result {
 	var in params.FirecrackerInput
 
 	kit.DecodeInput(op.PluginInput, &in)
+
+	cc, err := sdk.NewCheckContext(req.GetExecutorBrokerId(), req.GetEnvJson())
+	if err != nil {
+		return sdk.ResultJSON("fail", fmt.Sprintf("firecracker: %s: no venue context: %v", in.Method, err))
+	}
+
+	res := p.RunVerb(ctx, cc, &op)
+
+	return sdk.ResultJSON(statusWord(res.Status), res.Message)
+}
+
+// statusWord renders the typed status as the wire word the host grades.
+func statusWord(s spec.Status) string {
+	switch s {
+	case spec.StatusPass:
+		return "pass"
+	case spec.StatusSkip:
+		return "skip"
+	default:
+		return "fail"
+	}
+}
+
+// Reserved is the word this verb answers to. It is on the SAME type as Invoke so one object serves
+// both classes (the shape every two-class plugin in the org uses).
+func (p *provider) Reserved() string { return "firecracker" }
+
+// RunVerb runs an authored `firecracker:` check step. `doctor` reports what this host can do and
+// FAILS on any missing precondition; `vmm` proves the API client against the real VMM binary. Neither
+// method claims a guest was booted: the boot needs a rootfs from the producer leg (ledger WI-7), and a
+// verb that reported one before that existed would be a capability with nothing behind it.
+func (p *provider) RunVerb(ctx context.Context, cc kit.CheckContext, op *spec.Op) kit.Result {
+	var in params.FirecrackerInput
+
+	kit.DecodeInput(op.PluginInput, &in)
+
+	if in.Method == "vmm" {
+		return runVMMProbe(ctx, cc, in)
+	}
 
 	rep := runDoctor(doctorRequest{
 		Binary:           in.Binary,

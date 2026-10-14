@@ -153,3 +153,69 @@ func hasProblem(rep doctorReport, substr string) bool {
 
 	return false
 }
+
+// realCTRPluginsLS is the REAL output of `ctr plugins ls`, captured from a live daemon — not a
+// hand-written approximation of it. That distinction is the whole point of this gate: the bug it
+// guards against was a parser written against an ASSUMED column order, and an assumed sample would
+// have agreed with it.
+const realCTRPluginsLS = `TYPE                                      ID                       PLATFORMS      STATUS
+io.containerd.content.v1                  content                  -              ok
+io.containerd.event.v1                    exchange                 -              ok
+io.containerd.mount-handler.v1            erofs                    linux/amd64    ok
+io.containerd.snapshotter.v1              blockfile                linux/amd64    skip
+io.containerd.snapshotter.v1              btrfs                    linux/amd64    skip
+io.containerd.snapshotter.v1              devmapper                linux/amd64    skip
+io.containerd.snapshotter.v1              erofs                    linux/amd64    skip
+io.containerd.snapshotter.v1              native                   linux/amd64    ok
+io.containerd.snapshotter.v1              overlayfs                linux/amd64    ok
+`
+
+// TestSnapshotterStateFromCTR_RealOutput pins the parse against that real text.
+func TestSnapshotterStateFromCTR_RealOutput(t *testing.T) {
+	cases := []struct {
+		snapshotter string
+		want        string
+		found       bool
+	}{
+		{"devmapper", "skip", true},
+		{"blockfile", "skip", true},
+		{"overlayfs", "ok", true},
+		{"native", "ok", true},
+		{"zfs", "", false},
+	}
+
+	for _, c := range cases {
+		state, found := snapshotterStateFromCTR(realCTRPluginsLS, c.snapshotter)
+		if found != c.found || state != c.want {
+			t.Errorf("snapshotterStateFromCTR(%q) = (%q, %v), want (%q, %v)", c.snapshotter, state, found, c.want, c.found)
+		}
+	}
+
+	// THE REGRESSION this gate exists for: an earlier parse read the THIRD column, which is PLATFORMS —
+	// so a healthy host was reported as `state "linux/amd64"` plus a FALSE problem, i.e. the doctor
+	// failed a host that was fine. The platform must never appear as a state.
+	for _, name := range []string{"devmapper", "overlayfs"} {
+		if state, _ := snapshotterStateFromCTR(realCTRPluginsLS, name); state == "linux/amd64" {
+			t.Fatalf("the PLATFORMS column was read as the state for %q — the exact bug this guards", name)
+		}
+	}
+}
+
+// TestSnapshotterStateFromCTR_ShortRowIsNotEvidence asserts a truncated row proves nothing: the state is
+// only the last field when all four columns are present.
+func TestSnapshotterStateFromCTR_ShortRowIsNotEvidence(t *testing.T) {
+	const truncated = "io.containerd.snapshotter.v1  devmapper  skip\n"
+
+	if _, found := snapshotterStateFromCTR(truncated, "devmapper"); found {
+		t.Error("a three-column row was accepted as evidence of a state")
+	}
+}
+
+// TestDoctor_UnconfiguredSnapshotterInventsNoProblem gates the false Problems entry: with no snapshotter
+// configured, the probe appended 'the daemon does not serve a snapshotter named "" at all', failing a
+// host that configured none. A doctor must not report a problem for something nobody asked about.
+func TestSnapshotterStateFromCTR_EmptyNameMatchesNothing(t *testing.T) {
+	if _, found := snapshotterStateFromCTR(realCTRPluginsLS, ""); found {
+		t.Fatal("an empty snapshotter name matched a row — it must match nothing")
+	}
+}

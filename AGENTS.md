@@ -52,9 +52,23 @@ lease.
 
 - **Schema first (SDD).** Change `schema/firecracker.cue`, then regenerate the params — never hand-
   transcribe a struct, and never hand-edit the generated file.
-- **A verb must not outrun the substrate.** The launch leg does not exist yet, so the verb is
-  read-only and says so. A method that reported a booted guest before a guest could be booted would
-  be the fake fix this project refuses.
+- **One provider must serve BOTH classes.** This plugin declares `verb:firecracker` and
+  `command:firecracker`, and both must come from the SAME type (the reference is `plugin-qdrant`):
+  the SDK asks the provider it is handed whether it also implements `kit.CheckVerbProvider`, and
+  `Invoke` must dispatch on `req.GetClass()`. Get either wrong and every `firecracker:` check step
+  silently runs the CLI instead of the verb — reporting `firecracker: command exited 1` while no check
+  ever executes. `plugin_test.go` gates both halves; do not remove them.
+- **A check runs where its subject lives.** `RunVerb` is dispatched in charly's process, so a probe
+  that shells out locally probes the wrong machine: drive the step's venue through `cc.Exec()`, and
+  never assert a read-back an API does not serve — Firecracker answers `GET /` and
+  `GET /machine-config` and returns `400 Invalid request method and/or path` for `/boot-source`,
+  `/drives/<id>` and `/network-interfaces/<id>` (measured on v1.17).
+- **A verb must not outrun the substrate.** `doctor` is a read-only probe; `vmm` proves the API client
+  by driving the REAL VMM binary (start, configure, read back, stop). Neither claims a booted guest,
+  because a boot needs a root drive that is a real filesystem — the producer, filed as
+  opencharly/plugin-firecracker#1. A method that reported a boot before a boot could happen would be the
+  fake fix this project refuses, and `launch`'s liveness gate exists for the same reason: an accepted
+  action is not a live instance.
 - Keep the probe's verdicts FAILING when a precondition is missing: `Problems` non-empty fails the
   step, so a bed can never pass on a host it did not check.
 
