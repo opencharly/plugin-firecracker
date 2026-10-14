@@ -15,6 +15,16 @@ producer-bed-image:
         build: [rpm]
         base: quay.io/fedora/fedora:43
         candy:
+            # The charly binary, and the ONE reason this bed cannot build yet.
+            #
+            # The org's bed convention is `charly-dev`, the local-source install — but its own doc says it
+            # is "consumed by bare name from the charly checkout" and that "a remote fetch of it is not a
+            # valid use: the binary is gitignored", so a bed in ANOTHER repo cannot compose it. That leaves
+            # the packaged route, which currently pins an exact RPM version the rolling repository has
+            # rolled past: `No match for argument: charly-2026.268.1917`
+            # (opencharly/layer-charly#17). So this bed VALIDATES and cannot yet BUILD, and the block is an
+            # org defect that is filed, measured, and not worked around: hand-installing a binary would make
+            # the bed prove something the product cannot do.
             - '@github.com/opencharly/layer-charly:v2026.274.0345'
             - '@github.com/opencharly/layer-container-nesting:v2026.271.2309'
             - '@github.com/opencharly/layer-firecracker/candy/layer-firecracker:v2026.287.1531'
