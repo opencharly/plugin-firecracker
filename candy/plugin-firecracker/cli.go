@@ -36,6 +36,22 @@ func CliMain(args []string) int { return runCommand(args) }
 // cliArgs is the parsed command line. One struct so every subcommand reads the same fields and a new
 // flag lands in one place.
 type cliArgs struct {
+	// positional carries `image build <box>`'s box — the ONE positional any subcommand accepts.
+	positional []string
+	// outDir is where the producer writes the root drive; engine names the container engine to drive.
+	outDir string
+	engine string
+	// The producer emit half: ref names the artefact image, image names the built box image whose tree
+	// became the root drive, kernel/kernelFrom describe the kernel artefact, the rest identify the box.
+	charly     string
+	ref        string
+	fromImage  string
+	kernelFrom string
+	distro     string
+	sshUser    string
+	baseUser   string
+	push       bool
+
 	sub     string
 	asJSON  bool
 	name    string
@@ -76,8 +92,10 @@ func runCommand(args []string) int {
 		return runStatusCLI(parsed)
 	case "stop":
 		return runStopCLI(parsed)
+	case "image":
+		return runImageCLI(parsed)
 	default:
-		fmt.Fprintf(os.Stderr, "firecracker: unknown subcommand %q (doctor, launch, status, stop)\n", parsed.sub)
+		fmt.Fprintf(os.Stderr, "firecracker: unknown subcommand %q (doctor, launch, status, stop, image)\n", parsed.sub)
 
 		return 2
 	}
@@ -85,13 +103,22 @@ func runCommand(args []string) int {
 
 // valueFlags are the flags that take the NEXT token as their value.
 var valueFlags = map[string]func(*cliArgs, string){
-	"--name":     func(a *cliArgs, v string) { a.name = v },
-	"--binary":   func(a *cliArgs, v string) { a.binary = v },
-	"--kernel":   func(a *cliArgs, v string) { a.kernel = v },
-	"--rootfs":   func(a *cliArgs, v string) { a.rootfs = v },
-	"--tap":      func(a *cliArgs, v string) { a.tap = v },
-	"--guest-ip": func(a *cliArgs, v string) { a.guestIP = v },
-	"--tap-ip":   func(a *cliArgs, v string) { a.tapIP = v },
+	"--charly":      func(a *cliArgs, v string) { a.charly = v },
+	"--ref":         func(a *cliArgs, v string) { a.ref = v },
+	"--from-image":  func(a *cliArgs, v string) { a.fromImage = v },
+	"--kernel-from": func(a *cliArgs, v string) { a.kernelFrom = v },
+	"--distro":      func(a *cliArgs, v string) { a.distro = v },
+	"--ssh-user":    func(a *cliArgs, v string) { a.sshUser = v },
+	"--base-user":   func(a *cliArgs, v string) { a.baseUser = v },
+	"--out":         func(a *cliArgs, v string) { a.outDir = v },
+	"--engine":      func(a *cliArgs, v string) { a.engine = v },
+	"--name":        func(a *cliArgs, v string) { a.name = v },
+	"--binary":      func(a *cliArgs, v string) { a.binary = v },
+	"--kernel":      func(a *cliArgs, v string) { a.kernel = v },
+	"--rootfs":      func(a *cliArgs, v string) { a.rootfs = v },
+	"--tap":         func(a *cliArgs, v string) { a.tap = v },
+	"--guest-ip":    func(a *cliArgs, v string) { a.guestIP = v },
+	"--tap-ip":      func(a *cliArgs, v string) { a.tapIP = v },
 	"--guest-mac": func(a *cliArgs, v string) {
 		a.mac = v
 	},
@@ -106,7 +133,7 @@ var valueFlags = map[string]func(*cliArgs, string){
 	"--socket":      func(a *cliArgs, v string) { a.socket = v },
 }
 
-var subcommands = map[string]bool{"doctor": true, "launch": true, "status": true, "stop": true}
+var subcommands = map[string]bool{"doctor": true, "launch": true, "status": true, "stop": true, "image": true}
 
 func parseArgs(args []string) (cliArgs, error) {
 	out := cliArgs{sub: "doctor"}
@@ -117,8 +144,14 @@ func parseArgs(args []string) (cliArgs, error) {
 		switch {
 		case arg == "--json":
 			out.asJSON = true
+		case arg == "--push":
+			out.push = true
 		case subcommands[arg]:
 			out.sub = arg
+		case out.sub == "image" && !strings.HasPrefix(arg, "-"):
+			// `image build <box>` — the ONE subcommand that takes a positional: every other subcommand
+			// keeps rejecting stray arguments.
+			out.positional = append(out.positional, arg)
 		case valueFlags[arg] != nil:
 			if i+1 >= len(args) {
 				return out, fmt.Errorf("%s needs a value", arg)
@@ -129,7 +162,7 @@ func parseArgs(args []string) (cliArgs, error) {
 		case strings.HasPrefix(arg, "-"):
 			return out, fmt.Errorf("unknown flag %q", arg)
 		default:
-			return out, fmt.Errorf("unknown argument %q (subcommands: doctor, launch, status, stop)", arg)
+			return out, fmt.Errorf("unknown argument %q (subcommands: doctor, launch, status, stop, image)", arg)
 		}
 	}
 
