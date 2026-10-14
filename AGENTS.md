@@ -76,6 +76,22 @@ lease.
   through one explicit `sudo -n` — the untar that buys the ownership, the `du -sb` measurement, the
   cleanup of a previous run's tree, and `mke2fs`, which must read root-only files such as `/etc/gshadow`.
   The bed that proves all of this inside a disposable target is opencharly/plugin-firecracker#5.
+
+  The boot, executed (a VMM driven over its API socket; no TAP, no root, no network needed):
+
+  ```
+  $ firecracker-v1.17.0-x86_64 --api-sock …   (PUT /boot-source, /drives/rootfs, /machine-config → 204)
+  $ curl … -d '{"action_type":"InstanceStart"}' /actions                    → 204
+  [    0.000000] Linux version 6.1.155+ …
+  [    2.184632] EXT4-fs (vda): mounted filesystem with ordered data mode. Quota mode: none.
+  [    3.094703] systemd[1]: systemd 258.11-1.fc43 running in system mode (+PAM +AUDIT +SELINUX …)
+  [    3.124802] systemd[1]: Detected virtualization kvm.
+  Welcome to Fedora Linux 43 (Container Image)!
+  [    3.158291] systemd[1]: Hostname set to <fedora>.
+  ```
+
+  This boot is also the CONTROL that catches a root drive with no userspace at all: before the subject
+  box carried its `distro: [fedora]` tag, systemd was never installed, and this ends in `No working init`.
 - Keep the probe's verdicts FAILING when a precondition is missing: `Problems` non-empty fails the
   step, so a bed can never pass on a host it did not check.
 
