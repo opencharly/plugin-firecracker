@@ -35,3 +35,69 @@ plugin-firecracker:
               context:
                 - build
               command: "true"
+
+# The family's skill entity: the corpus generator emits .dsh/skills/firecracker/SKILL.md from this, so the
+# projection is never edited directly. Its content is the measured half of the umbrella ledger's work — the
+# facts that cost bed runs to establish, written down where the next reader starts instead of re-deriving.
+firecracker-skill:
+    skill:
+        name: firecracker
+        family: firecracker
+        owner: plugin-firecracker
+        description: |-
+            The `firecracker` microVM substrate: a guest booted directly under KVM from a ROOT DRIVE ARTEFACT plus a SEPARATE KERNEL — no libvirt, no domain, no host arbiter lease. Covers `charly firecracker image build` (the producer that turns a box into the drive), the VMM's real API surface, the boot recipe that needs no TAP, no root and no network, and the beds that gate it. Use before authoring, building or debugging any Firecracker artefact or `firecracker:` step.
+        category: kind
+        triggers:
+            - "Firecracker / a microVM / `charly firecracker` / the root-drive + kernel artefact / the `firecracker:` verb or command surface"
+            - "building a microVM box image / an ext4 root drive / booting a guest under KVM without libvirt"
+            - "the `check-firecracker-*` beds / the Firecracker pool host"
+        content: |
+            # Firecracker — the microVM substrate for charly
+
+            A guest booted directly under KVM from two artefacts charly produces: a **root drive** (a raw ext4
+            image) and a **separate kernel**. There is no libvirt, no domain, and no host arbiter lease — which is
+            why `plugin-substrate` declares this kind with **no `ExclusiveVenue`**, so the kernel never misroutes a
+            deploy into `charly vm build`/`create`.
+
+            ## The producer
+
+            `charly firecracker image build <box>` builds a box, extracts its image tree with **ownership
+            fidelity**, formats a raw ext4 root drive, and emits a microVM box image carrying the drive and the
+            kernel. It runs as an ordinary user: the build and the engine reads use the invoking user's engine,
+            and **everything that touches the extracted tree is elevated** through one explicit `sudo -n` — the
+            untar, the `du -sb` measurement, the cleanup of a previous run's tree, and `mke2fs` (which must read
+            root-only files such as `/etc/gshadow`).
+
+            ## The VMM's real API surface — measured, not assumed
+
+            Firecracker answers `GET /` and `GET /machine-config`, and returns
+            `400 Invalid request method and/or path` for `/boot-source`, `/drives/<id>` and
+            `/network-interfaces/<id>`. So never read back a document the API does not serve: assert the ones it
+            does.
+
+            The boot recipe, measured end to end:
+
+            ```
+            firecracker --api-sock <sock>
+              PUT /boot-source     → 204
+              PUT /drives/rootfs   → 204
+              PUT /machine-config  → 204
+              PUT /actions {"action_type":"InstanceStart"} → 204
+            ```
+
+            **No TAP, no root, no network are needed.** The guest's serial console is the VMM's own stdout, which
+            is where a boot is asserted — `EXT4-fs (vda): mounted filesystem` and `systemd[N]: systemd … running in
+            system mode` are the lines that prove the artefact boots.
+
+            ## What a guest needs, and how that is proven
+
+            A root drive with **no userspace** boots to `No working init`, so a box whose packages are declared in
+            a distro-scoped section needs the matching **box tag** (`distro: [fedora]`) or those packages are
+            never installed. Assert the artefact's **contents** as well as its boot: `debugfs` reads the drive
+            back and shows the ownership the producer preserved.
+
+            ## Working inside a disposable target
+
+            A deploy provides its target the host's charly as an executable **file** at
+            `/tmp/charly-<CalVer>[-<hash>]` — not a directory containing `bin/charly`, and not named exactly
+            `charly`. Resolve it by scanning `/tmp/charly-*` for an executable file.
