@@ -146,7 +146,12 @@ check-firecracker-producer:
               command: |
                 set -eu
                 cd /opt/fc-producer
-                charly firecracker image build producer-subject \
+                # The charly a deploy provides to its target (measured: "host charly provided at
+                # /tmp/charly-<CalVer>-<hash>"), falling back to PATH.
+                CHARLY=$(command -v charly || true)
+                if [ -z "$CHARLY" ]; then CHARLY=$(find /tmp -maxdepth 3 -name charly -type f -perm -u+x 2>/dev/null | head -1); fi
+                test -x "$CHARLY"
+                "$CHARLY" firecracker image build producer-subject \
                   --ref localhost/fc-producer-proof:1 \
                   --kernel /var/lib/firecracker/kernels/5.10/vmlinux
                 L=$(podman inspect localhost/fc-producer-proof:1 --format '{{ index .Labels "ai.opencharly.vm.box" }}')
