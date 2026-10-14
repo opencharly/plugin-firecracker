@@ -64,11 +64,18 @@ lease.
   `GET /machine-config` and returns `400 Invalid request method and/or path` for `/boot-source`,
   `/drives/<id>` and `/network-interfaces/<id>` (measured on v1.17).
 - **A verb must not outrun the substrate.** `doctor` is a read-only probe; `vmm` proves the API client
-  by driving the REAL VMM binary (start, configure, read back, stop). Neither claims a booted guest,
-  because a boot needs a root drive that is a real filesystem — the producer, filed as
-  opencharly/plugin-firecracker#1. A method that reported a boot before a boot could happen would be the
-  fake fix this project refuses, and `launch`'s liveness gate exists for the same reason: an accepted
-  action is not a live instance.
+  by driving the REAL VMM binary (start, configure, read back, stop). Neither claims a booted guest. A
+  method that reported a boot before a boot could happen would be the fake fix this project refuses, and
+  `launch`'s liveness gate exists for the same reason: an accepted action is not a live instance.
+- **The producer exists, and its artefact has been booted.** `charly firecracker image build <box>` builds
+  a box, extracts its image tree with ownership fidelity, formats a raw ext4 root drive and emits a
+  microVM box image carrying the drive and the kernel. Measured end to end: a real box → a 426 MiB raw
+  ext4 → the VMM starting it, the ext4 mounting as `vda`, and `systemd` coming up as PID 1. It runs as an
+  ordinary user: the build and the engine reads use the invoking user's engine (whose store holds the
+  image and whose network resolves), and **everything that touches the extracted tree is elevated**
+  through one explicit `sudo -n` — the untar that buys the ownership, the `du -sb` measurement, the
+  cleanup of a previous run's tree, and `mke2fs`, which must read root-only files such as `/etc/gshadow`.
+  The bed that proves all of this inside a disposable target is opencharly/plugin-firecracker#5.
 - Keep the probe's verdicts FAILING when a precondition is missing: `Problems` non-empty fails the
   step, so a bed can never pass on a host it did not check.
 
