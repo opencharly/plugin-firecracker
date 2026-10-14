@@ -24,10 +24,17 @@ script sees the failure instead of parsing prose. `--json` prints the same repor
 
 ## Status
 
-**Read-only today, on purpose.** The launch leg — boot-source, drives, machine-config, NIC, vsock,
-MMDS, serial, rate limiters, snapshots, per-lease artefact materialisation and `firecracker_state` —
-plus the R10 bed that boots a real guest and runs an in-guest plan, are the next slices. The verb
-reports what exists rather than claiming a capability the substrate cannot yet honour.
+**What exists today.** `doctor` reports what a host can do. `launch` starts the VMM, writes a WHOLE
+lease into it over the API — boot source, drive, machine config, network interface, MMDS v2 tree — and
+starts the instance, gate-checking that the VMM survived the first moments; `status` reports a lease
+from its record by asking the API whether it is still there; `stop` powers the guest down and waits for
+the VMM to exit. The `vmm` check method proves the same client against a REAL VMM binary inside the R10
+bed, which runs in a disposable guest.
+
+**What does not exist yet, on purpose:** a **booted guest**. That needs a root drive that is a real
+filesystem — a producer, filed as opencharly/plugin-firecracker#1 — and until it lands, `launch`
+requires a rootfs you supply and nothing claims a guest came up. A verb that reported a boot before a
+boot could happen is the fake fix this project refuses.
 
 The structural half of the substrate (`kind:firecracker`, its declared traits and its status row) is
 served by [opencharly/plugin-substrate](https://github.com/opencharly/plugin-substrate); this repo

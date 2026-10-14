@@ -52,9 +52,12 @@ lease.
 
 - **Schema first (SDD).** Change `schema/firecracker.cue`, then regenerate the params — never hand-
   transcribe a struct, and never hand-edit the generated file.
-- **A verb must not outrun the substrate.** The launch leg does not exist yet, so the verb is
-  read-only and says so. A method that reported a booted guest before a guest could be booted would
-  be the fake fix this project refuses.
+- **A verb must not outrun the substrate.** `doctor` is a read-only probe; `vmm` proves the API client
+  by driving the REAL VMM binary (start, configure, read back, stop). Neither claims a booted guest,
+  because a boot needs a root drive that is a real filesystem — the producer, filed as
+  opencharly/plugin-firecracker#1. A method that reported a boot before a boot could happen would be the
+  fake fix this project refuses, and `launch`'s liveness gate exists for the same reason: an accepted
+  action is not a live instance.
 - Keep the probe's verdicts FAILING when a precondition is missing: `Problems` non-empty fails the
   step, so a bed can never pass on a host it did not check.
 
