@@ -1,0 +1,65 @@
+# The project the producer builds from, written INTO the bed's image by a candy plan.
+#
+# A candy plan can materialise whole files (run: + write: + mode:), which is what makes a host-building
+# tool testable inside a disposable pod at all: the pod has no checkout, so the subject box and its guest
+# candy have to be delivered as files. The content is deliberately minimal — the producer's own gate proves
+# the PIPELINE, while what the produced guest must do when booted belongs to the boot bed (WI-13).
+producer-bed-env:
+    candy:
+        description: The artefact producer's bed environment — the plugin baked from the branch under review, and the project it builds from written into the image so a disposable pod needs no checkout.
+        # A CANDY field, not a box field: on a node with `base:` it is rejected with
+        # "bake_plugin: field not allowed" (measured). And it names the LOCAL candy, not a remote ref of
+        # this same repo: a remote ref collides with the plugin candy this repo already declares —
+        # `local candy "plugin-firecracker" shadows remote candy "github.com/opencharly/..."` (measured) —
+        # and baking the local candy is also the more honest thing, because the local tree IS the tree
+        # under review.
+        bake_plugin:
+            - plugin-firecracker
+        plan:
+            - run: write the project manifest the producer resolves against
+              id: producer-project-manifest
+              write: /opt/fc-producer/charly.yml
+              mode: "0644"
+              run_as: root
+              content: |
+                discover:
+                    - path: box
+                      recursive: true
+                    - path: candy
+                      recursive: true
+            - run: write the subject box the root drive is produced from
+              id: producer-project-box
+              write: /opt/fc-producer/box/producer-subject/charly.yml
+              mode: "0644"
+              run_as: root
+              content: |
+                producer-subject:
+                    candy:
+                        description: A minimal Fedora root filesystem for the artefact producer.
+                        distro: [fedora]
+                        build: [rpm]
+                        base: quay.io/fedora/fedora:43
+                        candy:
+                            - producer-subject-guest
+            - run: write the guest candy the subject box composes
+              id: producer-project-guest
+              write: /opt/fc-producer/candy/producer-subject-guest/charly.yml
+              mode: "0644"
+              run_as: root
+              content: |
+                producer-subject-guest:
+                    candy:
+                        description: The guest userspace a Firecracker root drive must carry — systemd as PID 1 and sshd to enter through.
+                        distro:
+                            fedora:
+                                package:
+                                    - systemd
+                                    - openssh-server
+                                    - openssh-clients
+                        plan:
+                            - check: the guest userspace is really there — an init to be PID 1 and an sshd to enter through
+                              id: guest-userspace-present
+                              command: test -x /usr/lib/systemd/systemd && test -x /usr/sbin/sshd
+            - check: the project is complete enough for the producer to resolve a box out of it
+              id: producer-project-present
+              command: test -f /opt/fc-producer/charly.yml && test -f /opt/fc-producer/box/producer-subject/charly.yml && test -f /opt/fc-producer/candy/producer-subject-guest/charly.yml
