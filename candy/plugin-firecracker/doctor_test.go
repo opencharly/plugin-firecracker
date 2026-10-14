@@ -210,3 +210,12 @@ func TestSnapshotterStateFromCTR_ShortRowIsNotEvidence(t *testing.T) {
 		t.Error("a three-column row was accepted as evidence of a state")
 	}
 }
+
+// TestDoctor_UnconfiguredSnapshotterInventsNoProblem gates the false Problems entry: with no snapshotter
+// configured, the probe appended 'the daemon does not serve a snapshotter named "" at all', failing a
+// host that configured none. A doctor must not report a problem for something nobody asked about.
+func TestSnapshotterStateFromCTR_EmptyNameMatchesNothing(t *testing.T) {
+	if _, found := snapshotterStateFromCTR(realCTRPluginsLS, ""); found {
+		t.Fatal("an empty snapshotter name matched a row — it must match nothing")
+	}
+}

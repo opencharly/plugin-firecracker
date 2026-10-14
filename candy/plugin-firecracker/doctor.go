@@ -271,7 +271,12 @@ func probeContainerd(rep *doctorReport) {
 
 	rep.ContainerdUp = true
 
-	probeSnapshotterServed(rep)
+	// Ask only when a snapshotter was CONFIGURED. With an empty name no row can match, so the probe
+	// appended 'the daemon does not serve a snapshotter named "" at all' and failed a host that
+	// configured none.
+	if rep.Snapshotter != "" {
+		probeSnapshotterServed(rep)
+	}
 }
 
 // probeSnapshotterServed asks the DAEMON whether it is actually serving the configured snapshotter.

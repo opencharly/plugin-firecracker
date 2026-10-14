@@ -280,21 +280,16 @@ func (c *vmmClient) configure(ctx context.Context, l vmmLease) error {
 		}
 	}
 
-	// READ BACK the two documents that decide what the guest is: "the API said 204" and "the VMM is
-	// configured this way" are different claims.
-	var boot struct {
-		KernelImagePath string `json:"kernel_image_path"`
-		BootArgs        string `json:"boot_args"`
-	}
-
-	if err := c.call(ctx, http.MethodGet, apiBootSource, nil, &boot); err != nil {
-		return fmt.Errorf("read back boot source: %w", err)
-	}
-
-	if boot.KernelImagePath != l.KernelPath {
-		return fmt.Errorf("boot source read back as %q, want %q", boot.KernelImagePath, l.KernelPath)
-	}
-
+	// READ BACK what this API actually SERVES. Measured on a real Firecracker v1.17: GET / and
+	// GET /machine-config answer, and GET /mmds returns the tree — while GET /boot-source,
+	// GET /drives/<id> and GET /network-interfaces/<id> are 400 "Invalid request method and/or path".
+	//
+	// An earlier version of this client read the BOOT SOURCE back, so every configure against a real VMM
+	// failed, and its test double answered that GET — the double agreed with the wrong assumption
+	// instead of the API, which is exactly the failure mode the probe's own comment warns about.
+	// The boot source and the drive are proven by their ACCEPTED WRITE (call rejects any non-2xx); the
+	// configuration is proven by the document the API serves, as a SUBSET, because the VMM owns fields
+	// of its own (track_dirty_pages, huge_pages).
 	var machine struct {
 		VCPUCount  int `json:"vcpu_count"`
 		MemSizeMiB int `json:"mem_size_mib"`

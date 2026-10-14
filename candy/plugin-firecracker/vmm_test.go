@@ -123,13 +123,16 @@ func (f *fakeVMM) handle(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == apiVersionPath:
 		writeJSON(w, map[string]any{"firecracker_version": version})
 	case r.URL.Path == apiBootSource && r.Method == http.MethodGet:
-		if boot == nil {
-			http.Error(w, `{"fault_message":"no boot source"}`, http.StatusBadRequest)
+		// The REAL answer, measured on Firecracker v1.17: this endpoint has no GET. A double must
+		// answer what the API answers, or it certifies the client's wrong assumptions — which is
+		// exactly how the boot-source read-back survived a green test suite.
+		note := ""
 
-			return
+		if boot != nil {
+			note = " (a boot source WAS written; this endpoint still has no GET)"
 		}
 
-		writeJSON(w, boot)
+		http.Error(w, `{"fault_message":"Invalid request method and/or path: GET boot-source.`+note+`"}`, http.StatusBadRequest)
 	case r.URL.Path == apiMachineConfig && r.Method == http.MethodGet:
 		if machine == nil {
 			http.Error(w, `{"fault_message":"no machine config"}`, http.StatusBadRequest)
@@ -206,7 +209,6 @@ func TestVMMClient_ConfigureSendsTheProvenSequence(t *testing.T) {
 		"PUT " + apiIfacesPrefix + "eth0",
 		"PUT " + apiMMDSConfig,
 		"PUT " + apiMMDS,
-		"GET " + apiBootSource,
 		"GET " + apiMachineConfig,
 		"GET " + apiMMDS,
 	}
