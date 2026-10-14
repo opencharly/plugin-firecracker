@@ -77,12 +77,53 @@ func TestParseArgs_OnlyImageTakesAPositional(t *testing.T) {
 	}
 }
 
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
+// TestBoxMetadataIsTheLabelContract pins the artefact's label contract as a pure value: what the emitted
+// image must say about itself, and where its root drive came from.
+func TestBoxMetadataIsTheLabelContract(t *testing.T) {
+	p := producer{Distro: "fedora", SSHUser: "root", BaseUser: "user"}
+
+	m := p.boxMetadata("check-firecracker-rootfs")
+
+	if m.Arch != "x86_64" || m.Init != "systemd" || m.Firmware != "bios" || m.CharlyInstall != "auto" {
+		t.Errorf("the microVM shape is wrong: arch=%q init=%q firmware=%q charly_install=%q", m.Arch, m.Init, m.Firmware, m.CharlyInstall)
 	}
 
-	return false
+	if m.Distro != "fedora" || m.SSHUser != "root" || m.BaseUser != "user" {
+		t.Errorf("the caller's box facts did not reach the label: %+v", m)
+	}
+
+	if m.Source.Kind != "rootfs" || m.Source.Image != "check-firecracker-rootfs" {
+		t.Errorf("the provenance is wrong: %+v", m.Source)
+	}
+
+	// The version is the BINARY's CalVer stamp, injected at build time — empty in a dev/worktree build by
+	// design. What the contract pins is that the artefact carries that stamp, not that it is non-empty here.
+	if m.Version != boxVersion() {
+		t.Errorf("the artefact's version %q is not the build's stamp %q", m.Version, boxVersion())
+	}
+}
+
+// TestPickImageRef pins the selection rule that was wrong once: a box build lands as
+// localhost/<box>:<CalVer> (so a prefix match on the bare name misses it) and a rebuild adds a new CalVer
+// while leaving the previous one behind (so the newest must win).
+func TestPickImageRef(t *testing.T) {
+	lines := []string{
+		"quay.io/fedora/fedora:43",
+		"localhost/check-firecracker-rootfs:2026.287.1825",
+		"localhost/check-firecracker-rootfs:2026.287.1840",
+		"localhost/check-other:2026.299.0000",
+	}
+
+	got, ok := pickImageRef(lines, "check-firecracker-rootfs")
+	if !ok || got != "localhost/check-firecracker-rootfs:2026.287.1840" {
+		t.Errorf("pickImageRef = (%q, %v), want the NEWEST match of the named box", got, ok)
+	}
+
+	if _, ok := pickImageRef(lines, "check-absent"); ok {
+		t.Error("a box with no image was reported as found")
+	}
+
+	if _, ok := pickImageRef([]string{"localhost/check-firecracker-rootfs-extra:1"}, "check-firecracker-rootfs"); ok {
+		t.Error("a sibling whose name merely contains the box name was accepted")
+	}
 }

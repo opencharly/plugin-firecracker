@@ -42,15 +42,14 @@ type cliArgs struct {
 	outDir string
 	engine string
 	// The producer emit half: ref names the artefact image, image names the built box image whose tree
-	// became the root drive, kernel/kernelFrom describe the kernel artefact, the rest identify the box.
-	charly     string
-	ref        string
-	fromImage  string
-	kernelFrom string
-	distro     string
-	sshUser    string
-	baseUser   string
-	push       bool
+	// became the root drive, kernel describes the kernel artefact, the rest identify the box.
+	charly    string
+	ref       string
+	fromImage string
+	distro    string
+	sshUser   string
+	baseUser  string
+	push      bool
 
 	sub     string
 	asJSON  bool
@@ -103,22 +102,21 @@ func runCommand(args []string) int {
 
 // valueFlags are the flags that take the NEXT token as their value.
 var valueFlags = map[string]func(*cliArgs, string){
-	"--charly":      func(a *cliArgs, v string) { a.charly = v },
-	"--ref":         func(a *cliArgs, v string) { a.ref = v },
-	"--from-image":  func(a *cliArgs, v string) { a.fromImage = v },
-	"--kernel-from": func(a *cliArgs, v string) { a.kernelFrom = v },
-	"--distro":      func(a *cliArgs, v string) { a.distro = v },
-	"--ssh-user":    func(a *cliArgs, v string) { a.sshUser = v },
-	"--base-user":   func(a *cliArgs, v string) { a.baseUser = v },
-	"--out":         func(a *cliArgs, v string) { a.outDir = v },
-	"--engine":      func(a *cliArgs, v string) { a.engine = v },
-	"--name":        func(a *cliArgs, v string) { a.name = v },
-	"--binary":      func(a *cliArgs, v string) { a.binary = v },
-	"--kernel":      func(a *cliArgs, v string) { a.kernel = v },
-	"--rootfs":      func(a *cliArgs, v string) { a.rootfs = v },
-	"--tap":         func(a *cliArgs, v string) { a.tap = v },
-	"--guest-ip":    func(a *cliArgs, v string) { a.guestIP = v },
-	"--tap-ip":      func(a *cliArgs, v string) { a.tapIP = v },
+	"--charly":     func(a *cliArgs, v string) { a.charly = v },
+	"--ref":        func(a *cliArgs, v string) { a.ref = v },
+	"--from-image": func(a *cliArgs, v string) { a.fromImage = v },
+	"--distro":     func(a *cliArgs, v string) { a.distro = v },
+	"--ssh-user":   func(a *cliArgs, v string) { a.sshUser = v },
+	"--base-user":  func(a *cliArgs, v string) { a.baseUser = v },
+	"--out":        func(a *cliArgs, v string) { a.outDir = v },
+	"--engine":     func(a *cliArgs, v string) { a.engine = v },
+	"--name":       func(a *cliArgs, v string) { a.name = v },
+	"--binary":     func(a *cliArgs, v string) { a.binary = v },
+	"--kernel":     func(a *cliArgs, v string) { a.kernel = v },
+	"--rootfs":     func(a *cliArgs, v string) { a.rootfs = v },
+	"--tap":        func(a *cliArgs, v string) { a.tap = v },
+	"--guest-ip":   func(a *cliArgs, v string) { a.guestIP = v },
+	"--tap-ip":     func(a *cliArgs, v string) { a.tapIP = v },
 	"--guest-mac": func(a *cliArgs, v string) {
 		a.mac = v
 	},
