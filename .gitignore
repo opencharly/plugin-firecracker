@@ -1,0 +1,6 @@
+# Generated build and check artefacts. The sibling repos ignore these too (layer-firecracker does), and
+# none of them belong in history: `.check/` holds disposable-bed run artefacts, `.build/` and `image/`
+# hold generated Containerfile/build-context output.
+.check/
+.build/
+image/
