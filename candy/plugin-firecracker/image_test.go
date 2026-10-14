@@ -97,8 +97,9 @@ func TestBoxMetadataIsTheLabelContract(t *testing.T) {
 		t.Errorf("the provenance is wrong: %+v", m.Source)
 	}
 
-	// The version is the BINARY's CalVer stamp, injected at build time — empty in a dev/worktree build by
-	// design. What the contract pins is that the artefact carries that stamp, not that it is non-empty here.
+	// boxVersion returns empty and says so: this build injects no CalVer stamp, so the artefact version
+	// field is empty ON PURPOSE. The gate pins that the metadata carries exactly what boxVersion reports
+	// - no invention between the two - and that an empty version is never filled with a guess.
 	if m.Version != boxVersion() {
 		t.Errorf("the artefact's version %q is not the build's stamp %q", m.Version, boxVersion())
 	}
