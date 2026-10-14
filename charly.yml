@@ -151,6 +151,104 @@ check-firecracker-producer:
                 CHARLY=$(command -v charly || true)
                 if [ -z "$CHARLY" ]; then CHARLY=$(find /tmp -maxdepth 3 -name charly -type f -perm -u+x 2>/dev/null | head -1); fi
                 test -x "$CHARLY"
+                # The producer's own output is captured and surfaced on stderr. Measured: a failing step
+                # stdout is swallowed (opencharly/charly#912), so leaving the producer's error there would
+                # hide exactly the words a reader needs - and the five preconditions above already proved
+                # THEY are satisfied, which is what makes this the place to look.
+                if ! "$CHARLY" firecracker image build producer-subject \
+                       --ref localhost/fc-producer-proof:1 \
+                       --kernel /var/lib/firecracker/kernels/5.10/vmlinux > /tmp/producer.log 2>&1; then
+                  echo "the producer failed; its own output follows:" >&2
+                  tail -25 /tmp/producer.log >&2
+                  exit 1
+                fi
+                tail -5 /tmp/producer.log >&2
+                L=$(podman inspect localhost/fc-producer-proof:1 --format '{{ index .Labels "ai.opencharly.vm.box" }}')
+                echo "$L"
+                echo "$L" | grep -q rootfs_path
+                echo "$L" | grep -q kernel_path
+                ID=$(podman create localhost/fc-producer-proof:1)
+                podman export "$ID" | tar -t | grep -qx rootfs.img
+                podman export "$ID" | tar -t | grep -qx vmlinux
+                podman rm -f "$ID" >/dev/null
+
+# =============================================================================
+# The producer inside a DISPOSABLE TARGET — the bed the review asked for.
+#
+# Round 10-11 established that a POD cannot host this: the producer needs an engine, and the nested-engine
+# candy's builder stage needs a precondition no consumer can supply. A VM needs no nesting at all — a real
+# distro has podman — and the deploy provides the charly a target needs (measured: "host charly provided at
+# /tmp/charly-<CalVer>-<hash>"), so the guest runs `charly firecracker image build` with the binary the
+# PLATFORM delivers. A nested `local:` member applies the candies inside the guest, so the operator's
+# workstation is untouched.
+# =============================================================================
+firecracker-producer-vm-host:
+    local:
+        description: >-
+            The artefact producer's preconditions inside a guest: the plugin itself (the project's plugins
+            are connected to the target by the deploy), the pinned kernel the emitted artefact must ship,
+            an engine from the distro, and the project it builds from written in by producer-bed-env.
+        candy:
+            - plugin-firecracker
+            - '@github.com/opencharly/layer-firecracker/candy/layer-firecracker:v2026.287.1531'
+            - producer-bed-env
+
+producer-vm-base:
+    vm:
+        source:
+            kind: cloud_image
+            url: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
+            base_user: arch
+            distro: arch
+        backend: libvirt
+        disk_size: 20G
+        ram: 4G
+        cpu: 2
+        machine: q35
+        firmware: bios
+        ssh:
+            port_auto: true
+            key_source: generate
+        cloud_init:
+            timezone: UTC
+            package:
+                - sudo
+                - podman
+
+check-firecracker-producer-vm:
+    vm:
+        from: producer-vm-base
+        disposable: true
+        lifecycle: dev
+        description: >-
+            The artefact producer on a disposable GUEST: the deploy provides charly, the distro provides the
+            engine, a nested local: member installs the plugin and the pinned kernel and writes the project,
+            and the plan asserts the emitted microVM box image at its boundary inside that guest. A VM needs
+            no nesting, which is exactly why it is the substrate a root-needing producer can use.
+        check-firecracker-producer-vm-member:
+            local:
+                from: firecracker-producer-vm-host
+        plan:
+            - check: the producer emits a microVM box image inside a disposable guest
+              id: producer-artefact-in-guest
+              command: |
+                set -eu
+                # Each precondition reports ITSELF on stderr. Measured twice: a listing of the guest state
+                # is truncated by the failure line, and a silent test under set -e says nothing at all -
+                # so the failure has to name the one thing that is missing, not print a directory.
+                cd /opt/fc-producer
+                [ -f /opt/fc-producer/charly.yml ] || { echo "MISSING project manifest at /opt/fc-producer/charly.yml" >&2; exit 1; }
+                [ -f /opt/fc-producer/box/producer-subject/charly.yml ] || { echo "MISSING subject box in the project" >&2; exit 1; }
+                [ -f /var/lib/firecracker/kernels/5.10/vmlinux ] || { echo "MISSING pinned kernel at /var/lib/firecracker/kernels/5.10/vmlinux" >&2; exit 1; }
+                command -v podman >/dev/null || { echo "NO PODMAN on PATH" >&2; exit 1; }
+                # The producer's four elevations go through `sudo -n`, and an unasserted precondition is
+                # exactly the kind that fails inside a step whose output is swallowed.
+                sudo -n true 2>/dev/null || { echo "NO PASSWORDLESS SUDO: the producer cannot elevate for the untar, the measurement, the cleanup and mke2fs" >&2; exit 1; }
+                echo "guest: user=$(id -u) sudo=ok podman=$(podman --version | head -1) charly=$(${CHARLY:-charly} version 2>&1 | head -1)" >&2
+                cd /opt/fc-producer
+                CHARLY=$(command -v charly || true)
+                if [ -z "$CHARLY" ]; then CHARLY=$(find /tmp -maxdepth 3 -name charly -type f -perm -u+x 2>/dev/null | head -1); fi
+                test -x "$CHARLY"
                 "$CHARLY" firecracker image build producer-subject \
                   --ref localhost/fc-producer-proof:1 \
                   --kernel /var/lib/firecracker/kernels/5.10/vmlinux
