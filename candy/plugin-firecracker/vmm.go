@@ -309,6 +309,14 @@ func (c *vmmClient) configure(ctx context.Context, l vmmLease) error {
 			machine.VCPUCount, machine.MemSizeMiB, l.vcpu(), l.memMiB())
 	}
 
+	if len(l.MMDS) > 0 && l.TAP == "" {
+		// Metadata is read THROUGH a network interface: a guest has no other way to reach the MMDS.
+		// Writing a tree without one is a lease that can never work, so the client refuses it here
+		// rather than configuring something the guest cannot use. (The probe learned the same lesson:
+		// it writes no tree without a tap either.)
+		return fmt.Errorf("the lease carries mmds metadata but no network interface (%d bytes of tree): a guest reads metadata through one", len(l.MMDS))
+	}
+
 	if len(l.MMDS) > 0 {
 		var tree map[string]any
 		if err := c.call(ctx, http.MethodGet, apiMMDS, nil, &tree); err != nil {

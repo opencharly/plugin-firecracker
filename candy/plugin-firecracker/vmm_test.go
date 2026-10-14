@@ -245,15 +245,31 @@ func TestVMMClient_ConfigureSendsTheProvenSequence(t *testing.T) {
 // lease was rejected by the client that built it, and the `vmm` probe (charly's identity only) could
 // never pass its own read-back.
 func TestVMMClient_MMDSReadBackMustMatchWhatWasWritten(t *testing.T) {
-	// A BARE lease — no fireactions block — must configure cleanly.
+	// A lease with no metadata at all, and no interface: nothing to couple, nothing to refuse.
 	f := newFakeVMM(t)
-	bare := vmmLease{
-		Name: "bare", KernelPath: "/k", RootDrive: "/r",
-		MMDS: map[string]any{"charly": map[string]any{"lease": "bare"}},
-	}
+	bare := vmmLease{Name: "bare", KernelPath: "/k", RootDrive: "/r"}
 
 	if err := newVMMClient(f.socket).configure(context.Background(), bare); err != nil {
-		t.Fatalf("a bare lease (no fireactions key) was rejected: %v", err)
+		t.Fatalf("a lease with no mmds tree was rejected: %v", err)
+	}
+
+	// A lease WITH metadata and a NIC configures cleanly: the tree must have a way to be read.
+	n := newFakeVMM(t)
+	withTap := vmmLease{
+		Name: "pool", KernelPath: "/k", RootDrive: "/r", TAP: "fc-tap0", GuestMAC: "06:00:AC:10:00:02",
+		MMDS: map[string]any{"charly": map[string]any{"lease": "pool"}},
+	}
+
+	if err := newVMMClient(n.socket).configure(context.Background(), withTap); err != nil {
+		t.Fatalf("a lease with mmds AND a tap was rejected: %v", err)
+	}
+
+	// …and WITHOUT one it is refused, by name: a guest reads metadata through an interface.
+	if err := newVMMClient(f.socket).configure(context.Background(), vmmLease{
+		Name: "broken", KernelPath: "/k", RootDrive: "/r",
+		MMDS: map[string]any{"charly": map[string]any{"lease": "broken"}},
+	}); err == nil {
+		t.Fatal("a lease carrying mmds metadata with no network interface was accepted")
 	}
 
 	// And a VMM that serves a DIFFERENT tree than it was given must fail the read-back: equality is the
@@ -261,7 +277,7 @@ func TestVMMClient_MMDSReadBackMustMatchWhatWasWritten(t *testing.T) {
 	g := newFakeVMM(t)
 	g.mutateMMDS = map[string]any{"charly": map[string]any{"lease": "SOMETHING-ELSE"}}
 
-	if err := newVMMClient(g.socket).configure(context.Background(), bare); err == nil {
+	if err := newVMMClient(g.socket).configure(context.Background(), withTap); err == nil {
 		t.Fatal("a mmds tree that did not match what was written was accepted")
 	}
 }
