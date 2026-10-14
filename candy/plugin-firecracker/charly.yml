@@ -29,6 +29,12 @@ plugin-firecracker:
             providers:
                 - verb:firecracker
                 - command:firecracker
+                # The deploy target, so this substrate is REACHABLE from the deploy path.
+                # pluginsgen projects every declared provider into plugins_refs_generated.go's
+                # provider-ref map, and without a deploy-class word here there is no `deploy:firecracker`
+                # entry for ResolveTarget to route on (opencharly/charly#916). Hand-editing that map
+                # is a gate violation, so the declaration is the only correct place for it.
+                - deploy:firecracker
         plan:
             - check: the substrate plugin ships a buildable Go module and a non-empty served CUE schema the host can compile, splice onto the base and dispatch
               id: firecracker-module-present
