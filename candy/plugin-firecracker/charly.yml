@@ -1,0 +1,36 @@
+plugin-firecracker:
+    candy:
+        description: |-
+            The Firecracker microVM substrate plugin — `verb:firecracker` + `command:firecracker`.
+
+            A microVM is booted directly under KVM from a ROOT DRIVE artefact plus a SEPARATE
+            kernel: no libvirt, no domain, no host arbiter lease. Its structural half (the
+            `kind:firecracker` word, its declared traits and its status row) is served by
+            candy/plugin-substrate, which owns the substrate kinds and declares venue "ssh"
+            WITHOUT an exclusive venue — the absence that keeps the kernel from misrouting the
+            deploy into `charly vm build`/`charly vm create` (IsVmVenue is ssh AND
+            exclusive_venue). This plugin owns the BEHAVIOUR behind the word.
+
+            THE FIRST SLICE IS THE READ-ONLY HOST PROBE, deliberately. `firecracker: {method: doctor}`
+            (and `charly firecracker doctor`) report what the target host can actually do: /dev/kvm
+            and its mode, the VMM binary and its version, the kernel and root-drive artefacts, the
+            containerd socket and whether the CONFIGURED snapshotter can back a root drive at all,
+            and the host's forwarding posture. Every missing precondition is named as a problem
+            rather than assumed away — the pattern the integration's RDD probes established (a
+            socket file is not a service; a device-less host cannot use devmapper; a stock guest
+            image ships no resolver).
+
+            The launch leg (boot-source, drives, machine-config, NIC, vsock, MMDS, serial, rate
+            limiters, snapshots, `firecracker_state`) and the R10 bed that boots a real guest come
+            next; the verb must not claim a capability the substrate cannot yet honour.
+        plugin:
+            source: github.com/opencharly/plugin-firecracker/candy/plugin-firecracker
+            providers:
+                - verb:firecracker
+                - command:firecracker
+        plan:
+            - check: the substrate plugin ships a buildable Go module and a non-empty served CUE schema the host can compile, splice onto the base and dispatch
+              id: firecracker-module-present
+              context:
+                - build
+              command: "true"

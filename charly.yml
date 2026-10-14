@@ -1,0 +1,58 @@
+# Makes this plugin repo a PROJECT so its own candy is actually gated.
+#
+# Without a root charly.yml the repo is "project-less": charly scans NO candies, so
+# `charly box validate` at the repo root exits 0 on ANY manifest, including one with a malformed
+# `plugin.providers` entry (opencharly/charly#459). Declaring `discover:` is the whole fix: the
+# candy is scanned and the CUE-schema gate applies.
+discover:
+    - path: candy
+      recursive: true
+
+# =============================================================================
+# The R10 witness for this plugin's first slice.
+#
+# The substrate's point is that a microVM runs on THIS host, so the bed's target IS the host: a
+# `local:` deploy marked `disposable: true` (the ONE authorization for autonomous rebuild). Its
+# plan dispatches the plugin's own `firecracker:` verb, which is reached in-process when the plugin
+# is compiled in and out-of-process when it is served from this repo — either way the step asserts a
+# LIVE answer about the host rather than a fixture: the KVM device and its mode, the VMM binary and
+# the version it reports, the artefacts, the containerd socket and whether the CONFIGURED
+# snapshotter can back a root drive, and the forwarding posture.
+#
+# The launch leg extends this bed with the microVM steps (boot → guest IP → SSH → the in-guest
+# candy's plan), which is the R10 proof the umbrella ledger's WI-13 owns.
+#
+# THE TEMPLATE/DEPLOY SPLIT MIRRORS check-substrate: the template is the recipe applied on the
+# destination, and the deploy names it — so the same recipe serves an operator running it by hand
+# and the bed running it on a disposable target. The `from:` ref needs a SAME-PROJECT template, and
+# this repo imports main for nothing, so the template is local.
+# =============================================================================
+check-firecracker-host-app:
+    local:
+        # Explicit placeholder: the recipe composes NO candy, so the bed's verdict is about the HOST
+        # and the plugin rather than about a package. Without this the node is invalid (a local
+        # template requires the field, and a missing required field must never be implied).
+        candy: []
+        description: |-
+            Minimal `kind: local` TEMPLATE for the firecracker host-precondition bed: a bare
+            `local:` node whose plan runs the plugin's `firecracker:` verb in `doctor` mode. It
+            composes nothing, so the bed's verdict is about the HOST and the plugin, never about a
+            package or a service.
+        plan:
+            - check: the host can boot a microVM — KVM present and usable, the VMM binary answers, the kernel and root-drive artefacts exist, the containerd socket is reachable, and the configured snapshotter can back a root drive (a directory-mounting snapshotter never can)
+              id: firecracker-host-preconditions
+              firecracker:
+                  method: doctor
+
+check-firecracker-host:
+    local:
+        from: check-firecracker-host-app
+        host: local
+        disposable: true
+        lifecycle: dev
+        description: >-
+            Sole R10 witness of the firecracker substrate plugin's read-only slice, run against the
+            operator's own host (a microVM's whole point is that it runs HERE). It proves the plugin
+            is discovered, that its `firecracker:` verb is dispatched and validated against the
+            served CUE schema, and that the verb's answer about the host is live. The launch leg
+            (booting a real guest, SSH into it, running an in-guest plan) extends this bed.
