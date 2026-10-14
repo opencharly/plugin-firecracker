@@ -27,18 +27,59 @@ discover:
 # and the bed running it on a disposable target. The `from:` ref needs a SAME-PROJECT template, and
 # this repo imports main for nothing, so the template is local.
 # =============================================================================
+# =============================================================================
+# check-firecracker-guest — the disposable VM the bed runs INSIDE.
+#
+# Same reason as the layer repo's own bed: this one installs a VMM and starts it, so it must never do
+# that to an operator's workstation. Nesting a `local:` member under a disposable `vm:` confines every
+# write to the guest (the canonical `check-arch-vm` → `arch-host` pattern).
+#
+# The guest needs its OWN /dev/kvm for any of this to mean anything: the host enables nested KVM
+# (`kvm_intel nested = Y`, measured) and the renderer defaults the CPU to `host-passthrough`, so the
+# guest gets VMX. The VM entity is per-repo on purpose — a same-project `from:` ref is required — which
+# is the established pattern for these beds.
+# =============================================================================
+check-firecracker-guest:
+    vm:
+        source:
+            # The rolling Arch cloud image: the dated pkgbuild paths rotate away (opencharly/charly#826),
+            # so the live spelling is used and the checksum block goes with the date.
+            kind: cloud_image
+            url: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
+            base_user: arch
+            distro: arch
+        backend: libvirt
+        disk_size: 20G
+        ram: 4G
+        cpu: 2
+        machine: q35
+        firmware: bios
+        ssh:
+            port_auto: true
+            key_source: generate
+        cloud_init:
+            timezone: UTC
+            package:
+                - sudo
+
+# =============================================================================
+# check-firecracker-host-app — the recipe the nested member applies INSIDE the guest.
+#
+# The PINNED host layer is the prerequisite and it is a repo ref, not a copy: one implementation of
+# "install the VMM and the kernel" is the point (R2). The pin is the layer's first CalVer tag, because
+# a ref to an untagged repo cannot resolve at all — measured, and the reason this leg waited for that
+# tag to exist (opencharly/layer-firecracker#5).
+# =============================================================================
 check-firecracker-host-app:
     local:
-        # The HOST layer is the bed's own prerequisite, and it is a repo ref rather than a copy: the
-        # layer that installs the pinned VMM + kernel onto a host is `opencharly/layer-firecracker`, and
-        # one implementation of "install the VMM" is the point (R2). It applies root-scoped steps —
-        # exactly the work this bed exists to exercise on a disposable target.
         candy:
-            - '@github.com/opencharly/layer-firecracker'
-        # Explicit placeholder for the plan's non-candy content.
+            - '@github.com/opencharly/layer-firecracker/candy/layer-firecracker:v2026.287.1531'
+        install_opts:
+            allow_root_tasks: true
         description: |-
-            The recipe the firecracker host bed applies: the pinned host layer, then the two checks that
-            matter — what this host can do, and whether the API client speaks the VMM's own protocol.
+            The recipe this bed applies inside its disposable guest: the pinned host layer, then the
+            checks that are this PLUGIN's business — that the API client speaks the VMM's own protocol,
+            and that a lease's drive is materialisable.
         plan:
             - run: create the scratch root drive the client's lease points at
               id: firecracker-probe-drive
@@ -53,11 +94,6 @@ check-firecracker-host-app:
                   mke2fs -q -t ext4 -F "$F"
                 fi
               run_as: root
-            - check: the host can boot a microVM — KVM, the VMM, the kernel, containerd, and the snapshotter the daemon actually SERVES
-              id: firecracker-host-preconditions
-              firecracker:
-                  method: doctor
-                  kernel: /var/lib/firecracker/kernels/5.10/vmlinux
             - check: the API client speaks the VMM's own protocol — the real binary accepts a whole lease and we read the documents back
               id: firecracker-client-protocol
               firecracker:
@@ -65,16 +101,32 @@ check-firecracker-host-app:
                   kernel: /var/lib/firecracker/kernels/5.10/vmlinux
                   rootfs: /tmp/charly-fc-probe-rootfs.ext4
 
+# =============================================================================
+# check-firecracker-host — the R10 bed for this plugin.
+#
+# What it proves: the plugin is discovered, its `firecracker:` verb is dispatched and validated against
+# the served CUE schema, the pinned host layer installs onto the guest, and the API client drives the
+# REAL VMM binary — a whole lease accepted and read back.
+#
+# What it deliberately does NOT assert, stated rather than implied: the `doctor` method's VERDICT. The
+# doctor answers "can this host run a POOL", which needs a containerd daemon serving a root-drive-capable
+# snapshotter (devmapper or blockfile) — a property of a POOL HOST, not of a disposable guest. Asserting
+# it here would either fail honestly for the wrong reason or tempt someone to weaken the check. The
+# doctor's live report was exercised directly (it named a real host's gaps: no VMM on PATH, a
+# permission-denied containerd dial), and its decisions are covered by unit gates; the guest boot itself
+# needs the rootfs producer (ledger WI-7) and lands with it.
+# =============================================================================
 check-firecracker-host:
-    local:
-        from: check-firecracker-host-app
-        host: local
+    vm:
+        from: check-firecracker-guest
         disposable: true
         lifecycle: dev
         description: >-
-            Sole R10 witness of the firecracker substrate plugin: the pinned VMM + kernel are installed
-            by opencharly/layer-firecracker onto this disposable target, the host is then asked what it
-            can actually do (KVM, the VMM and the version it answers, the fireactions kernel, containerd
-            and the snapshotter the daemon really serves), and the API client is proved against the REAL
-            VMM binary — it configures a whole lease and reads the decisive documents back. The guest
-            boot (a real rootfs, SSH into the guest, an in-guest plan) lands with the producer leg.
+            This plugin's R10 bed on a disposable guest: the pinned host layer installs the VMM, the
+            jailer and the fireactions kernel inside the VM, and the `vmm` check then proves the API
+            client against the real VMM binary — it writes a whole lease into the VMM and reads the
+            decisive documents back. Nested on purpose: the bed starts a VMM, so it must never touch the
+            operator's workstation.
+        check-firecracker-host-member:
+            local:
+                from: check-firecracker-host-app
