@@ -75,10 +75,15 @@ lease.
   image and whose network resolves), and **everything that touches the extracted tree is elevated**
   through one explicit `sudo -n` — the untar that buys the ownership, the `du -sb` measurement, the
   cleanup of a previous run's tree, and `mke2fs`, which must read root-only files such as `/etc/gshadow`.
-  The disposable-target proof SHIPS: `check-firecracker-producer-vm` runs the producer inside a disposable
-  GUEST (a VM, because a pod cannot host an engine and the nesting candy's builder stage needs a precondition
-  no consumer can supply), and asserts the emitted microVM box image at its boundary there. opencharly/
-  plugin-firecracker#5 is scoped to the POD bed alone, whose image cannot build.
+  The disposable-target bed EXISTS and is RED, and saying so is part of the contract. `check-firecracker-
+  producer-vm` is the disposable GUEST (a VM, because a pod cannot host an engine and the nesting candy's
+  builder stage needs a precondition no consumer can supply) whose step is meant to assert the emitted microVM
+  box image at its boundary. It does not pass, and the reason is outside this repository: its step reads
+  `[producer-artefact-in-guest] exit=2 want 0 (stderr: plugin env: unset)` — a deploy provides the guest charly
+  and NO candy corpus, so a plugin verb there has no plugin to reach (opencharly/charly#916, reproduced by this
+  bed). The producer path itself therefore never executed live in this bed, and no bed of this repo is green.
+  Do not read this paragraph as a shipped proof: R10 is OWED for the producer path until that capability lands,
+  and opencharly/plugin-firecracker#5 is scoped to the POD bed alone, whose image cannot build at all.
 
   The boot, executed (a VMM driven over its API socket; no TAP, no root, no network needed):
 
