@@ -22,6 +22,11 @@ producer-bed-env:
         env:
             XDG_RUNTIME_DIR: /tmp/xdg-runtime
         plan:
+            - check: the bed's inline subject copies still track the shipped check-firecracker-rootfs and check-firecracker-guest definitions (R2 — one source, two copies, and drift must not be landable)
+              id: bed-subject-parity
+              context:
+                - build
+              command: node candy/producer-bed-env/check-bed-subject-parity.mjs
             - run: create the per-user XDG runtime directory the nested engine requires
               id: xdg-runtime-dir
               run_as: root
@@ -49,12 +54,12 @@ producer-bed-env:
               content: |
                 producer-subject:
                     candy:
-                        description: A minimal Fedora root filesystem for the artefact producer.
+                        description: A minimal Fedora root filesystem for the Firecracker artefact producer — the subject its pipeline runs on.
                         distro: [fedora]
                         build: [rpm]
                         base: quay.io/fedora/fedora:43
                         candy:
-                            - producer-subject-guest
+                            - check-firecracker-guest
             - run: write the guest candy the subject box composes
               id: producer-project-guest
               write: /opt/fc-producer/candy/producer-subject-guest/charly.yml
