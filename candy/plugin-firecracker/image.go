@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -374,11 +375,19 @@ func (p producer) EmitBox(ctx context.Context, ref, fromImage, rootfs, kernel st
 	return nil
 }
 
-// boxVersion is the version the box label carries. It is EMPTY, and that is the whole truth: this build
-// has no CalVer stamp to inject, so nothing is invented here and a consumer must not read the field as a
-// claim. Wiring a real one (the emitter binary module version, which a tagged build carries) is the honest
-// way to fill it and is filed rather than faked.
-func boxVersion() string { return "" }
+// boxVersion is the version the box label carries, read from the build's own module version — which a
+// TAGGED build carries and an untagged one does not. This is the emitter binary reporting what it actually
+// is rather than a constant someone would have to keep true: the label cannot claim a version the binary
+// does not have, because the value comes from the binary.
+//
+// The untagged case returns "" and the caller records the label as absent rather than empty — R7 treats an
+// EMPTY label as a failure, and an absent one is the truthful statement about a build with no version.
+func boxVersion() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return ""
+}
 
 // sudoPrefix returns "sudo -n " when this process is not root, and nothing when it is. Elevation is
 // explicit and narrow: it is used by exactly the four commands that touch the EXTRACTED TREE — the untar
