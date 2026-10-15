@@ -1,0 +1,29 @@
+# The producer's R10 bed IMAGE: everything `charly firecracker image build` needs to run inside a
+# disposable pod — the charly CLI, a nested rootless engine (whose network resolves, unlike the host's
+# rootful one), the pinned kernel the emitted artefact must ship, and the plugin itself.
+#
+# THE REF IS THE BRANCH, deliberately: `bake_plugin` compiles from the repo at the pinned ref and the scan
+# then sees THAT ref's entity set. Pinning a release tag predating this work made the bed's own project
+# candies unresolvable — measured, and the reason this bed could not exist before the work was pushed.
+# Pointing at the branch means the bed is exercised against the very tree under review.
+#
+# The project it builds from is written in by `producer-bed-project`, because a pod has no checkout.
+producer-bed-image:
+    candy:
+        description: The artefact producer's own environment — charly, a nested rootless engine, the pinned kernel, the plugin baked from the branch under review, and the project it builds.
+        distro: [fedora]
+        build: [rpm]
+        base: quay.io/fedora/fedora:43
+        candy:
+            # NO charly candy here, deliberately. The org's bed-only candy (`charly-dev`) is checkout-only
+            # by its own declaration, and the packaged route pins an RPM version the rolling repository has
+            # rolled past (`No match for argument: charly-2026.268.1917`, opencharly/layer-charly#17) — but
+            # neither is needed: a deploy ALREADY provides the host's own charly to its target, measured at
+            # `/tmp/charly-<CalVer>-<hash>` ("host charly provided at …"), and the bed's step uses that. It
+            # is the more honest source too: the producer is exercised with the binary the platform
+            # delivers, never a hand-installed one.
+            - '@github.com/opencharly/layer-container-nesting:v2026.271.2309'
+            - '@github.com/opencharly/layer-firecracker/candy/layer-firecracker:v2026.287.1531'
+            - '@github.com/opencharly/layer-supervisord:v2026.271.1817'
+            # FIRST: its steps are preconditions for the nesting candy's own build step.
+            - producer-bed-env

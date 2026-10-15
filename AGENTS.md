@@ -64,11 +64,42 @@ lease.
   `GET /machine-config` and returns `400 Invalid request method and/or path` for `/boot-source`,
   `/drives/<id>` and `/network-interfaces/<id>` (measured on v1.17).
 - **A verb must not outrun the substrate.** `doctor` is a read-only probe; `vmm` proves the API client
-  by driving the REAL VMM binary (start, configure, read back, stop). Neither claims a booted guest,
-  because a boot needs a root drive that is a real filesystem — the producer, filed as
-  opencharly/plugin-firecracker#1. A method that reported a boot before a boot could happen would be the
-  fake fix this project refuses, and `launch`'s liveness gate exists for the same reason: an accepted
-  action is not a live instance.
+  by driving the REAL VMM binary (start, configure, read back, stop). Neither claims a booted guest. A
+  method that reported a boot before a boot could happen would be the fake fix this project refuses, and
+  `launch`'s liveness gate exists for the same reason: an accepted action is not a live instance.
+- **The producer exists, and its artefact has been booted.** `charly firecracker image build <box>` builds
+  a box, extracts its image tree with ownership fidelity, formats a raw ext4 root drive and emits a
+  microVM box image carrying the drive and the kernel. Measured end to end: a real box → a 426 MiB raw
+  ext4 → the VMM starting it, the ext4 mounting as `vda`, and `systemd` coming up as PID 1. It runs as an
+  ordinary user: the build and the engine reads use the invoking user's engine (whose store holds the
+  image and whose network resolves), and **everything that touches the extracted tree is elevated**
+  through one explicit `sudo -n` — the untar that buys the ownership, the `du -sb` measurement, the
+  cleanup of a previous run's tree, and `mke2fs`, which must read root-only files such as `/etc/gshadow`.
+  The disposable-target bed EXISTS and is RED, and saying so is part of the contract. `check-firecracker-
+  producer-vm` is the disposable GUEST (a VM, because a pod cannot host an engine and the nesting candy's
+  builder stage needs a precondition no consumer can supply) whose step is meant to assert the emitted microVM
+  box image at its boundary. It does not pass, and the reason is outside this repository: its step reads
+  `[producer-artefact-in-guest] exit=2 want 0 (stderr: plugin env: unset)` — a deploy provides the guest charly
+  and NO candy corpus, so a plugin verb there has no plugin to reach (opencharly/charly#916, reproduced by this
+  bed). The producer path itself therefore never executed live in this bed, and no bed of this repo is green.
+  Do not read this paragraph as a shipped proof: R10 is OWED for the producer path until that capability lands,
+  and opencharly/plugin-firecracker#5 is scoped to the POD bed alone, whose image cannot build at all.
+
+  The boot, executed (a VMM driven over its API socket; no TAP, no root, no network needed):
+
+  ```
+  $ firecracker-v1.17.0-x86_64 --api-sock …   (PUT /boot-source, /drives/rootfs, /machine-config → 204)
+  $ curl … -d '{"action_type":"InstanceStart"}' /actions                    → 204
+  [    0.000000] Linux version 6.1.155+ …
+  [    2.184632] EXT4-fs (vda): mounted filesystem with ordered data mode. Quota mode: none.
+  [    3.094703] systemd[1]: systemd 258.11-1.fc43 running in system mode (+PAM +AUDIT +SELINUX …)
+  [    3.124802] systemd[1]: Detected virtualization kvm.
+  Welcome to Fedora Linux 43 (Container Image)!
+  [    3.158291] systemd[1]: Hostname set to <fedora>.
+  ```
+
+  This boot is also the CONTROL that catches a root drive with no userspace at all: before the subject
+  box carried its `distro: [fedora]` tag, systemd was never installed, and this ends in `No working init`.
 - Keep the probe's verdicts FAILING when a precondition is missing: `Problems` non-empty fails the
   step, so a bed can never pass on a host it did not check.
 
