@@ -59,20 +59,21 @@ producer-bed-env:
                         build: [rpm]
                         base: quay.io/fedora/fedora:43
                         candy:
-                            # THE WRITTEN COPY, not the repo entity. In the POD bed the whole checkout is
-                            # inside the image, so `check-firecracker-guest` resolves by discover. In a
-                            # GUEST the project is only what this candy WRITES, so naming the repo entity
-                            # fails: measured `box "producer-subject": candy resolution error: unknown
-                            # candy "check-firecracker-guest"`. The next step writes that entity here as
-                            # `producer-subject-guest`, so the box composes THAT.
-                            - producer-subject-guest
+                            # THE WRITTEN COPY, under the SHIPPED name. In the POD bed the whole checkout
+                            # is inside the image, so the entity resolves by discover. In a GUEST the
+                            # project is only what this candy WRITES, so the reference fails until the copy
+                            # exists: measured `candy resolution error: unknown candy
+                            # "check-firecracker-guest"`. The next step WRITES that entity under the same
+                            # name, so the reference resolves AND the R2 parity guard still sees the
+                            # shipped box's own line (renaming it here is what broke parity).
+                            - check-firecracker-guest
             - run: write the guest candy the subject box composes
               id: producer-project-guest
-              write: /opt/fc-producer/candy/producer-subject-guest/charly.yml
+              write: /opt/fc-producer/candy/check-firecracker-guest/charly.yml
               mode: "0644"
               run_as: root
               content: |
-                producer-subject-guest:
+                check-firecracker-guest:
                     candy:
                         description: The guest userspace a Firecracker root drive must carry — systemd as PID 1 and sshd to enter through.
                         distro:
@@ -106,4 +107,4 @@ producer-bed-env:
                   exit 1; }
             - check: the project is complete enough for the producer to resolve a box out of it
               id: producer-project-present
-              command: test -f /opt/fc-producer/charly.yml && test -f /opt/fc-producer/box/producer-subject/charly.yml && test -f /opt/fc-producer/candy/producer-subject-guest/charly.yml
+              command: test -f /opt/fc-producer/charly.yml && test -f /opt/fc-producer/box/producer-subject/charly.yml && test -f /opt/fc-producer/candy/check-firecracker-guest/charly.yml
