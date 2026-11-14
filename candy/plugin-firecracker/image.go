@@ -380,8 +380,11 @@ func (p producer) EmitBox(ctx context.Context, ref, fromImage, rootfs, kernel st
 // is rather than a constant someone would have to keep true: the label cannot claim a version the binary
 // does not have, because the value comes from the binary.
 //
-// The untagged case returns "" and the caller records the label as absent rather than empty — R7 treats an
-// EMPTY label as a failure, and an absent one is the truthful statement about a build with no version.
+// The untagged case returns "", and the caller writes that EMPTY string into the label's `version` field:
+// boxMetadata sets `Version: boxVersion()` unconditionally, so an untagged build emits a label whose version
+// is empty, not a label that is absent. R7 treats an empty label as a failure; that is exactly the remainder
+// filed as opencharly/plugin-firecracker#14 (give an untagged build a real version, or omit the field), and this
+// comment states what the code does today rather than what it ought to.
 func boxVersion() string {
 	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
 		return bi.Main.Version
