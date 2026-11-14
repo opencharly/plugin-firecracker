@@ -78,8 +78,8 @@ lease.
   The disposable-target bed EXISTS and PASSES. `check-firecracker-producer-vm` is the disposable GUEST (a VM,
   because a pod cannot host an engine and the nesting candy's builder stage needs a precondition no consumer
   can supply) whose step asserts the emitted microVM box image at its boundary: it builds the box, produces the
-  drive, and reads the `ai.opencharly.box` label plus the exported `rootfs.img` back inside the guest.
-  `PASS (steps=16)`, `ok: true`, 0 errors / 0 warnings — measured at calver `2026.318.0350` on the tree this
+  drive, and reads the `ai.opencharly.vm.box` label (its `rootfs_path` and `kernel_path`) plus the exported `rootfs.img` back inside the guest.
+  `PASS (steps=16)`, `ok: true`, 0 errors / 0 warnings — measured at calver `2026.318.0417` on the tree this
   paragraph ships with.
 
   What it took to get there is the reason the paragraph is long: the guest had no engine (`NO PODMAN on PATH`),
