@@ -335,9 +335,9 @@ check-firecracker-producer-vm:
                 # `charly firecracker --help` in plugin-deploy-firecracker's bed and do NOT resolve here,
                 # so the difference is either the binary's age or this project's own scan.
                 echo "charly version: $("$CHARLY" version 2>&1)" >&2
-                ls -la /tmp/charly-plugins 2>&1 >&2
-                cat /tmp/charly-plugins/*.providers 2>&1 >&2
-                head -20 /opt/fc-producer/charly.yml 2>&1 >&2
+                ls -la /tmp/charly-plugins 2>&1 >&2 || true
+                cat /tmp/charly-plugins/*.providers 2>&1 >&2 || true
+                head -20 /opt/fc-producer/charly.yml 2>&1 >&2 || true
                 # DOES THE LOADER CONSULT THE VARIABLE AT ALL, and does a PROJECT MANIFEST change the
                 # answer? Same binary, same tree, two directories - the in-project call is the one that
                 # fails; the bare call is what my host test did when it resolved.
