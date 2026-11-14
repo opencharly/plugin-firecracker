@@ -24,6 +24,16 @@ producer-vm-engine:
                     # kernel cannot use the native overlay.
                     - slirp4netns
                     - fuse-overlayfs
+                    # THE PRODUCER'S OWN SHELL-OUTS, declared where the guest is defined.
+                    # `charly firecracker image build` partitions and populates the root drive
+                    # from the guest: mke2fs (e2fsprogs), du/truncate (coreutils), tar, and sh.
+                    # They are runtime dependencies of the ARTEFACT PRODUCER, so the venue that
+                    # runs it declares them - not the plugin's native package, which never runs
+                    # these on a host.
+                    - e2fsprogs
+                    - coreutils
+                    - tar
+                    - util-linux
         plan:
             - check: the engine is on PATH at the guest
               id: engine-present
