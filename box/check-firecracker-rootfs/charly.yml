@@ -1,0 +1,15 @@
+# The SUBJECT of the artefact producer (ledger WI-7): a minimal Fedora userspace that the producer turns
+# into a Firecracker root drive. Deliberately small — the producer's own gate proves the PIPELINE (box →
+# extracted tree → ext4 root drive → microVM box image with its label contract); what the guest must do
+# when BOOTED belongs to the boot bed.
+check-firecracker-rootfs:
+    candy:
+        description: A minimal Fedora root filesystem for the Firecracker artefact producer — the subject its pipeline runs on.
+        # The DISTRO TAG is what selects the candy's distro-scoped package section: without it the
+        # guest candy declares systemd and sshd under distro.fedora and NOTHING installs them, so the
+        # produced root drive is a machine with no init and no way in - measured, from the drive itself.
+        distro: [fedora]
+        build: [rpm]
+        base: quay.io/fedora/fedora:43
+        candy:
+            - check-firecracker-guest

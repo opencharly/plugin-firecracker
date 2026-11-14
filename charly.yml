@@ -5,6 +5,8 @@
 # `plugin.providers` entry (opencharly/charly#459). Declaring `discover:` is the whole fix: the
 # candy is scanned and the CUE-schema gate applies.
 discover:
+    - path: box
+      recursive: true
     - path: candy
       recursive: true
 
@@ -115,3 +117,211 @@ check-firecracker-host:
         check-firecracker-host-member:
             local:
                 from: check-firecracker-host-app
+
+# =============================================================================
+# The R10 bed for the ARTEFACT PRODUCER (WI-7).
+#
+# The producer is a HOST-building tool, so its disposable target is a pod carrying its own environment:
+# the charly CLI, a nested rootless engine (whose network resolves, unlike this host's rootful one), the
+# pinned kernel the emitted artefact must ship, the plugin baked from the branch under review, and the
+# project written in by `producer-bed-project` because a pod has no checkout.
+#
+# The step PRODUCES and then asserts, in that order, because the assertions are about an artefact that has
+# to exist first. What it asserts is what the ledger's R7 demands of an artefact: the label contract read
+# back from the built image, and the drive and the kernel verified inside it — not that a command exited 0.
+# =============================================================================
+# The producer inside a DISPOSABLE TARGET — the bed the review asked for.
+#
+# Round 10-11 established that a POD cannot host this: the producer needs an engine, and the nested-engine
+# candy's builder stage needs a precondition no consumer can supply. A VM needs no nesting at all — a real
+# distro has podman — and the deploy provides the charly a target needs (measured: "host charly provided at
+# /tmp/charly-<CalVer>-<hash>"), so the guest runs `charly firecracker image build` with the binary the
+# PLATFORM delivers. A nested `local:` member applies the candies inside the guest, so the operator's
+# workstation is untouched.
+# =============================================================================
+firecracker-producer-vm-host:
+    local:
+        description: >-
+            The artefact producer's preconditions inside a guest: the plugin itself (the project's plugins
+            are connected to the target by the deploy), the pinned kernel the emitted artefact must ship,
+            an engine from the distro, and the project it builds from written in by producer-bed-env.
+        candy:
+            - plugin-firecracker
+            - '@github.com/opencharly/layer-firecracker/candy/layer-firecracker:v2026.287.1531'
+            - producer-bed-env
+            # THE ENGINE, INSTALLED BY THE DEPLOY. The entity's `cloud_init.package:` list does not land
+            # podman in this guest (measured: the producer's step stops at `NO PODMAN on PATH` while every
+            # other precondition holds), so the engine is a composed candy whose plan asserts it is on PATH.
+            - producer-vm-engine
+            # THE `vm:` SUBSTRATE ITSELF. A `vm:` deploy routes to an OUT-OF-TREE provider and must
+            # be COMPOSED: measured with charly 2026.317.0814, without it this bed dies at
+            # deploy-add with `the "vm" deploy substrate is not available in this project — its
+            # deploy plugin (plugin-deploy-vm) is not in the candy closure`.
+            - '@github.com/opencharly/plugin-deploy-vm/candy/plugin-deploy-vm:main'
+            # THE TREE DELIVERER, PINNED TO THE RELEASE THAT FIXED IT. `charly firecracker` is an
+            # out-of-process command plugin, so the guest's CLI step needs the plugin TREE at
+            # /tmp/charly-plugins; `plugin-deploy-firecracker`'s `step:plugin-tree` is the only
+            # component that delivers one, and v2026.317.2115 is the release whose step resolves
+            # its sources from the engine's connected plugin set instead of scanning a store that
+            # a current charly no longer writes (opencharly/charly#1131).
+            - '@github.com/opencharly/plugin-deploy-firecracker/candy/plugin-deploy-firecracker:v2026.318.0132'
+
+producer-vm-base:
+    vm:
+        source:
+            kind: cloud_image
+            url: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
+            base_user: arch
+            distro: arch
+        backend: libvirt
+        disk_size: 20G
+        ram: 4G
+        cpu: 2
+        machine: q35
+        firmware: bios
+        ssh:
+            port_auto: true
+            key_source: generate
+        cloud_init:
+            timezone: UTC
+            package:
+                - sudo
+                - podman
+
+check-firecracker-producer-vm:
+    vm:
+        from: producer-vm-base
+        disposable: true
+        lifecycle: dev
+        description: >-
+            The artefact producer on a disposable GUEST: the deploy provides charly, the distro provides the
+            engine, a nested local: member installs the plugin and the pinned kernel and writes the project,
+            and the plan asserts the emitted microVM box image at its boundary inside that guest. A VM needs
+            no nesting, which is exactly why it is the substrate a root-needing producer can use.
+        check-firecracker-producer-vm-member:
+            local:
+                from: firecracker-producer-vm-host
+        plan:
+            - check: the producer emits a microVM box image inside a disposable guest
+              id: producer-artefact-in-guest
+              command: |
+                set -eu
+                # Each precondition reports ITSELF on stderr. Measured twice: a listing of the guest state
+                # is truncated by the failure line, and a silent test under set -e says nothing at all -
+                # so the failure has to name the one thing that is missing, not print a directory.
+                cd /opt/fc-producer
+                [ -f /opt/fc-producer/charly.yml ] || { echo "MISSING project manifest at /opt/fc-producer/charly.yml" >&2; exit 1; }
+                [ -f /opt/fc-producer/box/producer-subject/charly.yml ] || { echo "MISSING subject box in the project" >&2; exit 1; }
+                [ -f /var/lib/firecracker/kernels/5.10/vmlinux ] || { echo "MISSING pinned kernel at /var/lib/firecracker/kernels/5.10/vmlinux" >&2; exit 1; }
+                command -v podman >/dev/null || { echo "NO PODMAN on PATH" >&2; exit 1; }
+                # The producer's four elevations go through `sudo -n`, and an unasserted precondition is
+                # exactly the kind that fails inside a step whose output is swallowed.
+                sudo -n true 2>/dev/null || { echo "NO PASSWORDLESS SUDO: the producer cannot elevate for the untar, the measurement, the cleanup and mke2fs" >&2; exit 1; }
+                # No shell default-value expressions here, and none in this comment either: charly scans the
+                # WHOLE step text for its own variable substitution - comments included - and SKIPS the step
+                # when one does not resolve. Measured twice: it turned a real producer FAILURE into a vacuous
+                # PASS, and then the comment explaining that repeated the same mistake. A step whose text
+                # names an unresolved variable must never silently become evidence.
+                cd /opt/fc-producer
+                # THE PLUGIN TREE, SCAFFOLDED BY THE BED - and labelled as scaffolding. The guest carries
+                # the plugins at the stable path (the composed `plugin-deploy-firecracker` candy's
+                # `plugin-tree:` step delivers them), but naming that path in the step's ENVIRONMENT is
+                # opencharly/charly#977's job and it is not landed: the ENGINE will set it for the steps it
+                # runs. Until then a BED may set it in its own plan, which is the bed standing in for the
+                # engine - never a consumer's PRODUCT plan, and never a shell-init shim.
+                test -x /tmp/charly-plugins/plugin-firecracker || {
+                  echo "the guest has no delivered plugin tree at /tmp/charly-plugins" >&2
+                  ls -la /tmp/charly-plugins 2>/dev/null >&2 || echo "(no such directory)" >&2
+                  exit 1; }
+                CHARLY_PLUGIN_DIR=/tmp/charly-plugins
+                export CHARLY_PLUGIN_DIR
+                # The charly a deploy provides to its target, falling back to PATH - and it NAMES ITSELF on
+                # failure. Measured: this was the only precondition without a message, and it is exactly where
+                # the run died, so the failure line showed the guest summary and nothing else.
+                # The deploy own layout, MEASURED from the guest: /tmp/charly-<CalVer>[-<hash>]/bin/charly.
+                # The previous lookup missed it because find treats -maxdepth as a GLOBAL option and it was
+                # placed after the paths, so it never matched - and the failure said so, which is why this
+                # took one run instead of another round.
+                # The deploy provides charly as a FILE at /tmp/charly-<CalVer>[-<hash>] - MEASURED inside the
+                # guest, where that path is a 52 MB EXECUTABLE and not a directory. Two earlier lookups missed
+                # it for two different wrong assumptions: a glob that expected a bin/ subdirectory, and a find
+                # for a file named exactly charly - which it is not, the CalVer is part of the name.
+                CHARLY=$(command -v charly || true)
+                if [ -z "$CHARLY" ]; then
+                  for f in /tmp/charly-*; do
+                    if [ -f "$f" ] && [ -x "$f" ]; then CHARLY="$f"; break; fi
+                  done
+                fi
+                if [ ! -x "$CHARLY" ]; then
+                  echo "NO CHARLY FOUND in the guest. /tmp holds:" >&2
+                  ls /tmp >&2
+                  echo "PATH=$PATH" >&2
+                  exit 1
+                fi
+                # THE PRODUCER RUNS FIRST, AND ITS ERROR IS THE FIRST THING ON STDERR. The runner keeps
+                # only the LEADING ~200 characters of a failing step's stream (opencharly/charly#1141), so
+                # evidence printed before the invocation crowds the diagnosis out - measured three times
+                # tonight. Success prints the environment below, where it is a record and not a mask.
+                if ! "$CHARLY" firecracker image build producer-subject \
+                       --ref localhost/fc-producer-proof:1 \
+                       --kernel /var/lib/firecracker/kernels/5.10/vmlinux > /tmp/producer.log 2>&1; then
+                  # The marker is a PREFIX and the log is the payload, so the summary's leading 200
+                  # characters ARE the producer's own diagnosis (opencharly/charly#1141).
+                  # THE LAST 160 BYTES AND NOTHING ELSE. The runner keeps ~200 characters of a failing
+                  # step's stderr (opencharly/charly#1141); the producer's chained prefix
+                  # (`firecracker image build ...: box build ...: exit status N`) eats ~150 of them, so
+                  # every diagnostic printed before the error crowds out the cause. Measured five times
+                  # tonight: head -20, head -3 + tail -6 and tail -1 all lost it; the last 160 bytes
+                  # cannot.
+                  echo "PRODUCER FAILED:" >&2
+                  tail -c 160 /tmp/producer.log >&2
+                  exit 1
+                fi
+
+                # Where could a plugin be? Measured in plugin_loader.go: $CHARLY_PLUGIN_DIR is resolved
+                # first, then the FHS dir, and a dev/worktree build REFUSES the packaged dir - which is the
+                # build a deploy provides to its target. So the guest is asked, on stderr, before it runs.
+                echo "plugin env: $(printenv CHARLY_PLUGIN_DIR || echo unset)" >&2
+                # THE DECIDING EVIDENCE, before the invocation that fails: which charly is this, what is
+                # in the tree, is the manifest there, and does the project the step runs in declare a
+                # plugin of its own? Measured 2026-11-14: the same tree + variable RESOLVE
+                # `charly firecracker --help` in plugin-deploy-firecracker's bed and do NOT resolve here,
+                # so the difference is either the binary's age or this project's own scan.
+                echo "charly version: $("$CHARLY" version 2>&1)" >&2
+                ls -la /tmp/charly-plugins 2>&1 >&2 || true
+                cat /tmp/charly-plugins/*.providers 2>&1 >&2 || true
+                head -20 /opt/fc-producer/charly.yml 2>&1 >&2 || true
+                # DOES THE LOADER CONSULT THE VARIABLE AT ALL, and does a PROJECT MANIFEST change the
+                # answer? Same binary, same tree, two directories - the in-project call is the one that
+                # fails; the bare call is what my host test did when it resolved.
+                "$CHARLY" plugin path 2>&1 >&2 || echo "(no \`plugin path\` verb on this binary)" >&2
+                (cd / && CHARLY_PLUGIN_DIR=/tmp/charly-plugins "$CHARLY" firecracker --help 2>&1 | head -2) >&2 || true
+                (cd /opt/fc-producer && CHARLY_PLUGIN_DIR=/tmp/charly-plugins "$CHARLY" firecracker --help 2>&1 | head -2) >&2 || true
+                # NEITHER OF THESE MAY ABORT THE STEP. Measured 2026-11-14: under `set -eu` an
+                # unguarded `ls -d /usr/lib/charly/plugins` on a guest where that directory does not
+                # exist exits 2 - and the step died THERE, before the producer ever ran, while the
+                # summary reported "exit=2, want 0" as if the producer had. The probe is evidence,
+                # never a precondition.
+                ls -d /usr/lib/charly/plugins 2>/dev/null >&2 || true
+                ls ~/.cache/charly/plugins 2>/dev/null | head -4 >&2 || true
+                # The summary prints only on SUCCESS, so a failure line leads with the producer's own error
+                # rather than with a reassurance that the preconditions were fine.
+                # EVERY POST-PRODUCER PROBE IS GUARDED AND NAMES ITSELF. Measured 2026-11-14: after the
+                # producer returned 0 the step died with exit=1 and NO output, because an unguarded
+                # `podman inspect` on a missing image aborts the step under `set -eu` — the same class as
+                # the `ls -d` guard above, and just as invisible.
+                echo "guest ok: user=$(id -u) sudo=ok" >&2
+                if ! L=$(podman inspect localhost/fc-producer-proof:1 --format '{{ index .Labels "ai.opencharly.vm.box" }}' 2>/tmp/inspect.err); then
+                  echo "IMAGE MISSING after a producer that returned 0 - podman said:" >&2
+                  head -5 /tmp/inspect.err >&2
+                  echo "images present:" >&2
+                  podman images --format '{{.Repository}}:{{.Tag}}' 2>&1 | head -5 >&2 || true
+                  exit 1
+                fi
+                echo "$L"
+                echo "$L" | grep -q rootfs_path
+                echo "$L" | grep -q kernel_path
+                ID=$(podman create localhost/fc-producer-proof:1)
+                podman export "$ID" | tar -t | grep -qx rootfs.img
+                podman export "$ID" | tar -t | grep -qx vmlinux
+                podman rm -f "$ID" >/dev/null

@@ -1,0 +1,58 @@
+# The guest's container ENGINE, installed by the DEPLOY rather than by cloud-init.
+#
+# Measured on the `vm: cloud_image` bed (2026-11-13): the guest boots and the deploy applies, then the
+# producer's check step stops at `NO PODMAN on PATH` — every other precondition (sudo, the pinned kernel,
+# the project) is satisfied. The entity's `cloud_init.package:` list does not land podman in this guest,
+# so the ENGINE is composed here instead: a candy is applied by the deploy itself, on the venue, where a
+# package install is visible and assertable. That is the difference between "the image was SUPPOSED to
+# ship it" and "the deploy INSTALLED it" — and this bed exists to test the deploy, not the mirror.
+producer-vm-engine:
+    candy:
+        description: The container engine the artefact producer needs inside its disposable guest — composed and asserted by the deploy, not assumed from cloud-init.
+        distro:
+            arch:
+                package:
+                    - podman
+                    # the ROOTLESS BUILD drive `charly box build` starts: rootlesskit creates the user
+                    # and mount namespaces, buildkitd does the build, buildah assembles the image.
+                    # Measured 2026-11-14: without these the producer dies at
+                    # `buildkitdrive: start rootlesskit: exec: "rootlesskit": executable file not found`.
+                    - rootlesskit
+                    - buildkit
+                    - buildah
+                    # rootless networking, and the overlay driver a rootless store needs where the
+                    # kernel cannot use the native overlay.
+                    - slirp4netns
+                    - fuse-overlayfs
+                    # THE PRODUCER'S OWN SHELL-OUTS, declared where the guest is defined.
+                    # `charly firecracker image build` partitions and populates the root drive
+                    # from the guest: mke2fs (e2fsprogs), du/truncate (coreutils), tar, and sh.
+                    # They are runtime dependencies of the ARTEFACT PRODUCER, so the venue that
+                    # runs it declares them - not the plugin's native package, which never runs
+                    # these on a host.
+                    - e2fsprogs
+                    - coreutils
+                    - tar
+                    - util-linux
+        plan:
+            - check: the engine is on PATH at the guest
+              id: engine-present
+              command: command -v podman
+            - check: the rootless build drive's own toolchain is on PATH - measured, because its absence is what the producer hit next
+              id: build-drive-present
+              command: |
+                for tool in rootlesskit buildkitd buildctl buildah; do
+                  command -v "$tool" >/dev/null || {
+                    echo "the rootless build drive needs $tool and the guest has no such executable" >&2
+                    exit 1; }
+                done
+            - run: give the build user the sub-id ranges a ROOTLESS container store requires
+              id: subid-ranges
+              run_as: root
+              command: |
+                # Measured: a rootless podman/buildah store refuses to start without an id range and a
+                # minimal cloud image ships none. 65536 ids is podman's documented default range.
+                user=$(id -un 1000)
+                grep -q "^$user:" /etc/subuid 2>/dev/null || echo "$user:100000:65536" >> /etc/subuid
+                grep -q "^$user:" /etc/subgid 2>/dev/null || echo "$user:100000:65536" >> /etc/subgid
+                echo "subuid/subgid present for $user" >&2
