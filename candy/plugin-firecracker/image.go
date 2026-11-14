@@ -456,7 +456,9 @@ func boxLeaf(box string) string {
 	if i := strings.LastIndex(b, "@"); i >= 0 {
 		b = b[i+1:]
 	}
-	if i := strings.LastIndex(b, ":"); i >= 0 {
+	// Strip a :ref only when the colon FOLLOWS the last slash — a `@host:5000/…` form carries a
+	// port, and cutting at that colon would reduce the argument to the host.
+	if i := strings.LastIndex(b, ":"); i > strings.LastIndex(b, "/") {
 		b = b[:i]
 	}
 	if i := strings.LastIndex(b, "/"); i >= 0 {
