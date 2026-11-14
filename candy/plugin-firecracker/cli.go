@@ -144,12 +144,16 @@ func parseArgs(args []string) (cliArgs, error) {
 			out.asJSON = true
 		case arg == "--push":
 			out.push = true
+		case out.sub == "image" && !strings.HasPrefix(arg, "-"):
+			// ORDER MATTERS: once `image` is the subcommand, EVERY bare token is its POSITIONAL —
+			// including one that happens to be a subcommand name. Measured: with the subcommand case
+			// first, `firecracker image build doctor` set the sub to `doctor` and dropped the image
+			// invocation entirely, and a box legitimately named `status` or `launch` could never be
+			// built. `image build <box>` is the ONE shape that takes positionals; every other
+			// subcommand still rejects stray arguments.
+			out.positional = append(out.positional, arg)
 		case subcommands[arg]:
 			out.sub = arg
-		case out.sub == "image" && !strings.HasPrefix(arg, "-"):
-			// `image build <box>` — the ONE subcommand that takes a positional: every other subcommand
-			// keeps rejecting stray arguments.
-			out.positional = append(out.positional, arg)
 		case valueFlags[arg] != nil:
 			if i+1 >= len(args) {
 				return out, fmt.Errorf("%s needs a value", arg)

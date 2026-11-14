@@ -78,6 +78,31 @@ func TestParseArgs_OnlyImageTakesAPositional(t *testing.T) {
 	}
 }
 
+// TestParseArgs_ImagePositionalBeatsAReservedName is the MISROUTE regression: `image build <box>` must
+// treat every bare token after `image` as a POSITIONAL, including one that is also a subcommand name.
+// Measured before the fix: `image build doctor` set the sub to `doctor` and never reached the image
+// CLI at all, and a box named `status`/`launch`/`stop`/`image` could never be built.
+func TestParseArgs_ImagePositionalBeatsAReservedName(t *testing.T) {
+	for _, reserved := range []string{"doctor", "launch", "status", "stop", "image"} {
+		a, err := parseArgs([]string{"image", "build", reserved})
+		if err != nil {
+			t.Fatalf("image build %s was rejected: %v", reserved, err)
+		}
+		if a.sub != "image" {
+			t.Fatalf("image build %s parsed the sub as %q - a reserved word stole the positional", reserved, a.sub)
+		}
+		if len(a.positional) != 2 || a.positional[0] != "build" || a.positional[1] != reserved {
+			t.Fatalf("image build %s parsed positionals %v, want [build %s]", reserved, a.positional, reserved)
+		}
+	}
+
+	// And a bare reserved word is still a SUBCOMMAND when nothing selected `image` first.
+	a, err := parseArgs([]string{"status"})
+	if err != nil || a.sub != "status" {
+		t.Fatalf("bare `status` must stay the status subcommand: sub=%q err=%v", a.sub, err)
+	}
+}
+
 // TestBoxMetadataIsTheLabelContract pins the artefact's label contract as a pure value: what the emitted
 // image must say about itself, and where its root drive came from.
 func TestBoxMetadataIsTheLabelContract(t *testing.T) {
