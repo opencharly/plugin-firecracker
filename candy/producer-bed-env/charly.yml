@@ -59,7 +59,13 @@ producer-bed-env:
                         build: [rpm]
                         base: quay.io/fedora/fedora:43
                         candy:
-                            - check-firecracker-guest
+                            # THE WRITTEN COPY, not the repo entity. In the POD bed the whole checkout is
+                            # inside the image, so `check-firecracker-guest` resolves by discover. In a
+                            # GUEST the project is only what this candy WRITES, so naming the repo entity
+                            # fails: measured `box "producer-subject": candy resolution error: unknown
+                            # candy "check-firecracker-guest"`. The next step writes that entity here as
+                            # `producer-subject-guest`, so the box composes THAT.
+                            - producer-subject-guest
             - run: write the guest candy the subject box composes
               id: producer-project-guest
               write: /opt/fc-producer/candy/producer-subject-guest/charly.yml
@@ -79,6 +85,25 @@ producer-bed-env:
                             - check: the guest userspace is really there — an init to be PID 1 and an sshd to enter through
                               id: guest-userspace-present
                               command: test -x /usr/lib/systemd/systemd && test -x /usr/sbin/sshd
+            - run: hand the project to the user the producer runs as
+              id: producer-project-owner
+              run_as: root
+              command: chown -R "$(id -u 1000)":"$(id -g 1000)" /opt/fc-producer
+            - check: the project directory is WRITABLE by the producer's user, because a build writes .build into it
+              id: producer-project-writable
+              context:
+                - runtime
+              command: |
+                # MEASURED 2026-11-14: `charly box build` in the guest died with
+                #   creating .build directory: mkdir /opt/fc-producer/.build: permission denied
+                # because the project is WRITTEN as root (run_as: root, /opt needs root) and the
+                # producer's CLI step runs as the deploy user. The build owns a directory inside the
+                # project, so the project must be the producer's to write - not a chmod on .build,
+                # which the build recreates.
+                test -w /opt/fc-producer || {
+                  echo "the project at /opt/fc-producer is not writable by $(id -un) - a build cannot create .build there" >&2
+                  ls -ld /opt/fc-producer >&2
+                  exit 1; }
             - check: the project is complete enough for the producer to resolve a box out of it
               id: producer-project-present
               command: test -f /opt/fc-producer/charly.yml && test -f /opt/fc-producer/box/producer-subject/charly.yml && test -f /opt/fc-producer/candy/producer-subject-guest/charly.yml
