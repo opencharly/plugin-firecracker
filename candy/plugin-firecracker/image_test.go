@@ -153,4 +153,20 @@ func TestPickImageRef(t *testing.T) {
 	if _, ok := pickImageRef([]string{"localhost/check-firecracker-rootfs-extra:1"}, "check-firecracker-rootfs"); ok {
 		t.Error("a sibling whose name merely contains the box name was accepted")
 	}
+
+	// THE REMOTE-REF CASE, measured live 2026-11-14: `image build
+	// '@github.com/opencharly/layer-fireactions-runner/box/fireactions-runner:1e3e39f…'` BUILT
+	// `localhost/fireactions-runner:<calver>` and then failed its own lookup, because the raw
+	// argument names no image in the engine. The leaf name is what the build tags.
+	remote := []string{"localhost/fireactions-runner:2026.318.0515"}
+	got, ok = pickImageRef(remote, "@github.com/opencharly/layer-fireactions-runner/box/fireactions-runner:1e3e39f097d78e6328d26aca168d3baea2061265")
+	if !ok || got != "localhost/fireactions-runner:2026.318.0515" {
+		t.Errorf("pickImageRef(remote ref) = (%q, %v), want the box's leaf-name image", got, ok)
+	}
+	if leaf := boxLeaf("@github.com/opencharly/layer-fireactions-runner/box/fireactions-runner:1e3e39f"); leaf != "fireactions-runner" {
+		t.Errorf("boxLeaf = %q, want fireactions-runner", leaf)
+	}
+	if leaf := boxLeaf("fireactions-runner"); leaf != "fireactions-runner" {
+		t.Errorf("boxLeaf(local) = %q, want the name unchanged", leaf)
+	}
 }

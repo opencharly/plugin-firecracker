@@ -424,10 +424,17 @@ func (p producer) boxMetadata(fromImage string) spec.VmBoxMetadata {
 // SELECTION was wrong once: a build lands as localhost/<box>:<CalVer>, so a prefix match on the bare box
 // name misses it, and a rebuild adds a new CalVer while leaving the previous one behind.
 func pickImageRef(lines []string, box string) (string, bool) {
+	// The BOX ARGUMENT IS NOT ALWAYS A BARE NAME. A `@github.com/<org>/<repo>/box/<name>:<ref>`
+	// argument builds `<name>` and tags it `localhost/<name>:<calver>` — the engine never carries
+	// an image named after the remote ref, so matching the raw argument found nothing and the
+	// producer reported "the box build produced no image matching <ref>" AFTER a successful build
+	// (measured 2026-11-14: `podman images` carried `localhost/fireactions-runner:2026.318.0517`
+	// from the very run that failed the lookup). Match the argument's LEAF name.
+	leaf := boxLeaf(box)
 	var refs []string
 
 	for _, line := range lines {
-		if r := strings.TrimSpace(line); strings.Contains(r, "/"+box+":") || strings.HasPrefix(r, box+":") {
+		if r := strings.TrimSpace(line); strings.Contains(r, "/"+leaf+":") || strings.HasPrefix(r, leaf+":") {
 			refs = append(refs, r)
 		}
 	}
@@ -439,6 +446,23 @@ func pickImageRef(lines []string, box string) (string, bool) {
 	sort.Strings(refs) // CalVer tags sort lexically by time
 
 	return refs[len(refs)-1], true
+}
+
+// boxLeaf reduces a box argument to the NAME the build tags: it strips a remote prefix
+// (`@github.com/org/repo/…`), a `:ref` suffix, and every path segment before the last. A bare
+// local name passes through unchanged.
+func boxLeaf(box string) string {
+	b := box
+	if i := strings.LastIndex(b, "@"); i >= 0 {
+		b = b[i+1:]
+	}
+	if i := strings.LastIndex(b, ":"); i >= 0 {
+		b = b[:i]
+	}
+	if i := strings.LastIndex(b, "/"); i >= 0 {
+		b = b[i+1:]
+	}
+	return b
 }
 
 // resolveImageRef asks the engine which ref the box build produced. The newest match wins: a rebuild
